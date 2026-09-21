@@ -192,12 +192,8 @@ window.Exam = {
 
         <!-- Sidebar / Palette -->
         <div class="exam-sidebar">
-          <div class="palette-legend">
-            <div class="legend-item"><div class="legend-box p-answered"></div> Answered</div>
-            <div class="legend-item"><div class="legend-box p-unanswered"></div> Not Answered</div>
-            <div class="legend-item"><div class="legend-box p-not-visited"></div> Not Visited</div>
-            <div class="legend-item"><div class="legend-box p-marked"></div> Marked for Review</div>
-            <div class="legend-item" style="grid-column: span 2;"><div class="legend-box p-marked-answered"></div> Answered & Marked</div>
+          <div class="palette-legend" id="legend-counts-target">
+            <!-- Dynamically populated with live counts -->
           </div>
           <div class="palette-grid" id="palette-target"></div>
         </div>
@@ -278,7 +274,17 @@ window.Exam = {
 
   renderPalette() {
     const paletteTarget = document.getElementById('palette-target');
+    const legendTarget = document.getElementById('legend-counts-target');
     if (!paletteTarget) return;
+
+    // Counters for question categories
+    let counts = {
+      answered: 0,
+      unanswered: 0,
+      notVisited: 0,
+      marked: 0,
+      markedAnswered: 0
+    };
 
     paletteTarget.innerHTML = this.questions.map((q, idx) => {
       let stateClass = 'p-not-visited';
@@ -288,14 +294,19 @@ window.Exam = {
 
       if (isMarked && isAnswered) {
         stateClass = 'p-marked-answered';
+        counts.markedAnswered++;
       } else if (isMarked) {
         stateClass = 'p-marked';
+        counts.marked++;
       } else if (isAnswered) {
         stateClass = 'p-answered';
+        counts.answered++;
       } else if (isVisited) {
         stateClass = 'p-unanswered';
+        counts.unanswered++;
       } else {
         stateClass = 'p-not-visited';
+        counts.notVisited++;
       }
 
       const isCurrent = idx === this.currentIndex;
@@ -306,6 +317,17 @@ window.Exam = {
         </button>
       `;
     }).join('');
+
+    // Update palette legend with live counts
+    if (legendTarget) {
+      legendTarget.innerHTML = `
+        <div class="legend-item"><div class="legend-box p-answered"></div> Answered (${counts.answered})</div>
+        <div class="legend-item"><div class="legend-box p-unanswered"></div> Not Answered (${counts.unanswered})</div>
+        <div class="legend-item"><div class="legend-box p-not-visited"></div> Not Visited (${counts.notVisited})</div>
+        <div class="legend-item"><div class="legend-box p-marked"></div> Marked for Review (${counts.marked})</div>
+        <div class="legend-item" style="grid-column: span 2;"><div class="legend-box p-marked-answered"></div> Answered & Marked (${counts.markedAnswered})</div>
+      `;
+    }
   },
 
   startTimer() {
@@ -339,21 +361,41 @@ window.Exam = {
   confirmSubmissionDialog() {
     let answered = 0;
     let marked = 0;
+    let visitedCount = 0;
+
     this.questions.forEach(q => {
       if (this.answers[q.id] !== undefined) answered++;
       if (this.reviewMarked[q.id]) marked++;
+      if (this.visited[q.id]) visitedCount++;
     });
+
     const unanswered = this.questions.length - answered;
+    const notVisited = this.questions.length - visitedCount;
+
+    // Format remaining time for user display
+    const remHrs = Math.floor(this.secondsRemaining / 3600);
+    const remMins = Math.floor((this.secondsRemaining % 3600) / 60);
+    const remSecs = this.secondsRemaining % 60;
+
+    let timeString = '';
+    if (remHrs > 0) {
+      timeString = `${remHrs}h ${remMins}m ${remSecs}s`;
+    } else {
+      timeString = `${remMins}m ${remSecs}s`;
+    }
 
     window.showModal({
       title: 'Submit Exam Confirmation',
       bodyHtml: `
         <p style="margin-bottom:12px;">Are you sure you want to finish and submit your exam?</p>
-        <div style="background:var(--bg-muted); padding:12px; border-radius:var(--radius-sm); font-size:0.9rem;">
-          <p><strong>Total Questions:</strong> ${this.questions.length}</p>
-          <p><strong>Answered:</strong> ${answered}</p>
-          <p><strong>Unanswered:</strong> ${unanswered}</p>
-          <p><strong>Marked for Review:</strong> ${marked}</p>
+        <div style="background:var(--bg-muted); border:1px solid var(--border-color); padding:14px; border-radius:var(--radius-sm); font-size:0.95rem; line-height:1.7;">
+          <p>⏱️ <strong>Remaining Time:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${timeString}</span></p>
+          <hr style="border:none; border-top:1px solid var(--border-color); margin:8px 0;" />
+          <p>📝 <strong>Total Questions:</strong> ${this.questions.length}</p>
+          <p>✅ <strong>Answered:</strong> ${answered}</p>
+          <p>❌ <strong>Not Answered:</strong> ${unanswered}</p>
+          <p>🔘 <strong>Not Visited:</strong> ${notVisited}</p>
+          <p>🔖 <strong>Marked for Review:</strong> ${marked}</p>
         </div>
       `,
       confirmText: 'Yes, Submit Final Exam',
