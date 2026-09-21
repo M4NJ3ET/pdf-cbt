@@ -1,48 +1,59 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MockOrbit — CBT Practice Portal</title>
-  <link rel="stylesheet" href="styles.css">
-  <!-- Supabase JS Client v2 CDN -->
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- PDF.js CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
   </script>
 </head>
 <body>
-
-  <!-- App Header -->
-  <header class="header">
-    <div class="nav-container">
-      <div class="brand" onclick="window.location.hash='#/'" style="cursor:pointer;">
-          <span>📝</span>
-          <span>MockOrbit</span>
+  <!-- Header / Navigation Bar -->
+  <header class="app-header">
+    <div class="brand" onclick="window.location.hash='#/'" style="cursor:pointer; display:flex; align-items:center; gap:8px;">
+      <span style="font-size:1.4rem;">📝</span>
+      <span style="font-weight:700; font-size:1.25rem; color:var(--primary-accent);">MockOrbit</span>
     </div>
-      <nav class="nav-links" id="nav-actions">
-        <!-- Dynamically rendered by app.js -->
-      </nav>
-    </div>
+    <nav class="nav-links" id="nav-links" style="display:flex; align-items:center; gap:12px;">
+      <!-- Populated dynamically by app.js -->
+    </nav>
   </header>
 
-  <!-- Dynamic Page Root -->
-  <main class="container" id="app-root">
-    <div style="text-align:center; padding: 60px 0;">Loading application...</div>
+  <!-- Main View Container -->
+  <main class="app-container" id="app-root">
+    <div class="card" style="max-width:400px; margin:60px auto; text-align:center;">
+      <div class="spinner" style="margin: 0 auto 16px auto;"></div>
+      <p style="color:var(--text-secondary);">Loading MockOrbit...</p>
+    </div>
   </main>
 
-  <!-- Global Toast Notification Area -->
-  <div id="toast-container"></div>
+  <!-- Global Modal Container -->
+  <div id="modal-container"></div>
 
-  <!-- Global Modal Mount -->
-  <div id="modal-root"></div>
+  <!-- Global Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
 
-  <!-- Scripts -->
+  <!-- Global Loading / Spinner Overlay -->
+  <div id="global-loading-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:99999; flex-direction:column; align-items:center; justify-content:center; backdrop-filter:blur(3px);">
+    <div style="background:#fff; padding:28px 36px; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,0.3); text-align:center; max-width:340px;">
+      <div class="spinner" style="margin: 0 auto 16px auto; width:38px; height:38px; border-width:4px;"></div>
+      <h3 id="global-loading-title" style="margin-bottom:6px; font-size:1.15rem; color:#1a1a1a;">Processing...</h3>
+      <p id="global-loading-msg" style="color:#666; font-size:0.9rem; margin:0;">Please wait while we complete this action.</p>
+    </div>
+  </div>
+
+  <!-- App Application Scripts -->
   <script src="js/config.js"></script>
-  <script src="js/auth.js"></script>
   <script src="js/pdf-parser.js"></script>
+  <script src="js/auth.js"></script>
   <script src="js/host.js"></script>
   <script src="js/exam.js"></script>
   <script src="js/results.js"></script>
