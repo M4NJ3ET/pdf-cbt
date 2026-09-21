@@ -9,6 +9,7 @@ window.Exam = {
   timerInterval: null,
   secondsRemaining: 0,
   attemptId: null,
+  isPaused: false,
 
   // 1. Enter Key Prompt View
   renderKeyPrompt(container) {
@@ -110,6 +111,7 @@ window.Exam = {
     this.answers = {};
     this.reviewMarked = {};
     this.visited = {};
+    this.isPaused = false;
 
     // Restore state from localStorage if active attempt exists
     const storageKey = `cbt_attempt_${testId}_${window.AppState.user.id}`;
@@ -164,7 +166,22 @@ window.Exam = {
   // 4. CBT Layout Renderer
   renderExamInterface(container) {
     container.innerHTML = `
-      <div class="exam-layout">
+      <div class="exam-layout" style="position:relative;">
+        <!-- Break / Pause Fullscreen Overlay -->
+        <div id="exam-pause-overlay" style="display:none; position:absolute; inset:0; background:rgba(255, 255, 255, 0.96); backdrop-filter:blur(6px); z-index:999; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px;">
+          <div style="font-size:3.5rem; margin-bottom:12px;">☕</div>
+          <h2 style="font-size:1.8rem; margin-bottom:8px;">Exam Paused</h2>
+          <p style="color:var(--text-secondary); max-width:440px; margin-bottom:24px; font-size:1rem; line-height:1.6;">
+            You are currently on a break. The countdown timer has stopped and question content is hidden.
+          </p>
+          <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:12px 24px; margin-bottom:24px; font-size:1.1rem;">
+            ⏱️ Time Left: <strong id="overlay-timer-display" style="font-family:monospace; color:var(--primary-accent);">00:00:00</strong>
+          </div>
+          <button class="btn-primary" style="padding:14px 32px; font-size:1.1rem; box-shadow:0 4px 12px rgba(0,0,0,0.15);" onclick="Exam.resumeTest()">
+            ▶️ Resume Test
+          </button>
+        </div>
+
         <!-- Main Exam Column -->
         <div class="exam-main">
           <div class="exam-header">
@@ -172,7 +189,10 @@ window.Exam = {
               <strong style="font-size:1.1rem;">${this.currentTest.title}</strong>
               <div id="section-bar" style="margin-top:6px; display:flex; gap:8px;"></div>
             </div>
-            <div id="exam-timer" class="timer-box">00:00:00</div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <button class="btn-secondary" style="padding:6px 12px; font-size:0.85rem;" onclick="Exam.pauseTest()">☕ Take a Break</button>
+              <div id="exam-timer" class="timer-box">00:00:00</div>
+            </div>
           </div>
 
           <div class="exam-question-area" id="question-render-target"></div>
@@ -192,9 +212,7 @@ window.Exam = {
 
         <!-- Sidebar / Palette -->
         <div class="exam-sidebar">
-          <div class="palette-legend" id="legend-counts-target">
-            <!-- Dynamically populated with live counts -->
-          </div>
+          <div class="palette-legend" id="legend-counts-target"></div>
           <div class="palette-grid" id="palette-target"></div>
         </div>
       </div>
@@ -206,7 +224,7 @@ window.Exam = {
 
   renderCurrentQuestion() {
     const q = this.questions[this.currentIndex];
-    this.visited[q.id] = true; // Mark opened question as visited
+    this.visited[q.id] = true;
     const target = document.getElementById('question-render-target');
     const selectedOpt = this.answers[q.id];
 
@@ -227,6 +245,7 @@ window.Exam = {
   },
 
   selectOption(optIndex) {
+    if (this.isPaused) return;
     const q = this.questions[this.currentIndex];
     this.answers[q.id] = optIndex;
     this.renderCurrentQuestion();
@@ -234,6 +253,7 @@ window.Exam = {
   },
 
   clearResponse() {
+    if (this.isPaused) return;
     const q = this.questions[this.currentIndex];
     delete this.answers[q.id];
     this.renderCurrentQuestion();
@@ -241,6 +261,7 @@ window.Exam = {
   },
 
   saveAndNext() {
+    if (this.isPaused) return;
     this.saveLocalProgress();
     if (this.currentIndex < this.questions.length - 1) {
       this.currentIndex++;
@@ -249,6 +270,7 @@ window.Exam = {
   },
 
   prevQuestion() {
+    if (this.isPaused) return;
     if (this.currentIndex > 0) {
       this.currentIndex--;
       this.renderCurrentQuestion();
@@ -256,6 +278,7 @@ window.Exam = {
   },
 
   markForReviewAndNext() {
+    if (this.isPaused) return;
     const q = this.questions[this.currentIndex];
     this.reviewMarked[q.id] = true;
     this.saveLocalProgress();
@@ -268,6 +291,7 @@ window.Exam = {
   },
 
   jumpToQuestion(idx) {
+    if (this.isPaused) return;
     this.currentIndex = idx;
     this.renderCurrentQuestion();
   },
@@ -277,7 +301,6 @@ window.Exam = {
     const legendTarget = document.getElementById('legend-counts-target');
     if (!paletteTarget) return;
 
-    // Counters for question categories
     let counts = {
       answered: 0,
       unanswered: 0,
@@ -318,7 +341,6 @@ window.Exam = {
       `;
     }).join('');
 
-    // Update palette legend with live counts
     if (legendTarget) {
       legendTarget.innerHTML = `
         <div class="legend-item"><div class="legend-box p-answered"></div> Answered (${counts.answered})</div>
@@ -330,11 +352,37 @@ window.Exam = {
     }
   },
 
+  // 5. Break / Pause Engine
+  pauseTest() {
+    this.isPaused = true;
+    clearInterval(this.timerInterval);
+    this.saveLocalProgress();
+
+    const hrs = Math.floor(this.secondsRemaining / 3600);
+    const mins = Math.floor((this.secondsRemaining % 3600) / 60);
+    const secs = this.secondsRemaining % 60;
+    const formatted = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+    const overlay = document.getElementById('exam-pause-overlay');
+    const overlayTimer = document.getElementById('overlay-timer-display');
+    if (overlayTimer) overlayTimer.innerText = formatted;
+    if (overlay) overlay.style.display = 'flex';
+  },
+
+  resumeTest() {
+    this.isPaused = false;
+    const overlay = document.getElementById('exam-pause-overlay');
+    if (overlay) overlay.style.display = 'none';
+    this.startTimer();
+  },
+
   startTimer() {
     clearInterval(this.timerInterval);
     const timerElem = document.getElementById('exam-timer');
 
     this.timerInterval = setInterval(() => {
+      if (this.isPaused) return;
+
       this.secondsRemaining--;
       this.saveLocalProgress();
 
@@ -359,6 +407,8 @@ window.Exam = {
   },
 
   confirmSubmissionDialog() {
+    if (this.isPaused) return;
+
     let answered = 0;
     let marked = 0;
     let visitedCount = 0;
@@ -372,7 +422,6 @@ window.Exam = {
     const unanswered = this.questions.length - answered;
     const notVisited = this.questions.length - visitedCount;
 
-    // Format remaining time for user display
     const remHrs = Math.floor(this.secondsRemaining / 3600);
     const remMins = Math.floor((this.secondsRemaining % 3600) / 60);
     const remSecs = this.secondsRemaining % 60;
