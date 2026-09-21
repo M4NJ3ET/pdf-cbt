@@ -27,9 +27,9 @@ function updateNavigationUI() {
 
   if (!window.AppState.user) {
     navLinks.innerHTML = `
-      <a href="#/">Home</a>
-      <a href="#/login">Login</a>
-      <a href="#/register">Register</a>
+      <a href="#/" class="nav-item">Home</a>
+      <a href="#/login" class="nav-item">Login</a>
+      <a href="#/register" class="nav-item">Register</a>
     `;
     return;
   }
@@ -38,15 +38,14 @@ function updateNavigationUI() {
   const isHost = role === 'HOST';
 
   navLinks.innerHTML = `
-    <span class="nav-badge" style="${isHost ? 'background:#e6f4ea; color:#137333; font-weight:700; border:1px solid #b7e1cd;' : ''}">
+    <span class="nav-badge" style="${isHost ? 'background:#e6f4ea; color:#137333; font-weight:700; border:1px solid #b7e1cd;' : 'background:#e8f0fe; color:#1a73e8; font-weight:700; border:1px solid #c2e7ff;'} padding:3px 8px; border-radius:4px; font-size:0.8rem;">
       ${role}
     </span>
-    ${isHost ? `<a href="#/host/dashboard" style="font-weight:600; color:var(--primary-accent);">Host Hub</a>` : ''}
-    <a href="#/take-key">Take Test</a>
-    <a href="#/my-history">My History</a>
-    <a href="#/change-password">Settings</a>
-    <a href="#/register" style="color:var(--text-secondary); font-size:0.9rem;">Register New</a>
-    <button class="btn-outline" style="padding:4px 10px; font-size:0.85rem;" onclick="confirmLogout()">Logout</button>
+    ${isHost ? `<a href="#/host/dashboard" style="font-weight:600; color:var(--primary-accent); text-decoration:none;">Host Hub</a>` : ''}
+    <a href="#/take-key" style="text-decoration:none; color:inherit;">Take Test</a>
+    <a href="#/my-history" style="text-decoration:none; color:inherit;">My History</a>
+    <a href="#/change-password" style="text-decoration:none; color:inherit;">Settings</a>
+    <button class="btn-outline" style="padding:4px 12px; font-size:0.85rem; cursor:pointer;" onclick="confirmLogout()">Logout</button>
   `;
 }
 
@@ -77,7 +76,7 @@ async function handleRoute() {
     return;
   }
 
-  // Authentication Routes (Always accessible)
+  // Authentication Routes
   if (hash === '#/login') {
     Auth.renderLogin(root);
     return;
@@ -159,25 +158,25 @@ function renderHostDashboard(container) {
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
-        <div class="card" style="cursor:pointer; transition: transform 0.15s ease; border-top: 4px solid var(--primary-accent);" onclick="window.location.hash='#/host/upload'">
+        <div class="card" style="cursor:pointer; border-top: 4px solid var(--primary-accent);" onclick="window.location.hash='#/host/upload'">
           <div style="font-size: 2.4rem; margin-bottom: 8px;">📤</div>
           <h3 style="margin-bottom: 6px;">Upload Test</h3>
           <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Parse a question paper PDF or compose questions manually.</p>
         </div>
 
-        <div class="card" style="cursor:pointer; transition: transform 0.15s ease; border-top: 4px solid #1a73e8;" onclick="window.location.hash='#/host/tests'">
+        <div class="card" style="cursor:pointer; border-top: 4px solid #1a73e8;" onclick="window.location.hash='#/host/tests'">
           <div style="font-size: 2.4rem; margin-bottom: 8px;">📚</div>
           <h3 style="margin-bottom: 6px;">My Tests</h3>
           <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, copy test keys, and preview tests.</p>
         </div>
 
-        <div class="card" style="cursor:pointer; transition: transform 0.15s ease; border-top: 4px solid #f2994a;" onclick="window.location.hash='#/host/all-history'">
+        <div class="card" style="cursor:pointer; border-top: 4px solid #f2994a;" onclick="window.location.hash='#/host/all-history'">
           <div style="font-size: 2.4rem; margin-bottom: 8px;">📊</div>
           <h3 style="margin-bottom: 6px;">All Attempts</h3>
           <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Track student scores, submissions, accuracy, and pass/fail status.</p>
         </div>
 
-        <div class="card" style="cursor:pointer; transition: transform 0.15s ease; border-top: 4px solid #9b51e0;" onclick="window.location.hash='#/host/users'">
+        <div class="card" style="cursor:pointer; border-top: 4px solid #9b51e0;" onclick="window.location.hash='#/host/users'">
           <div style="font-size: 2.4rem; margin-bottom: 8px;">👥</div>
           <h3 style="margin-bottom: 6px;">Manage Users</h3>
           <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Authorize candidate emails and perform administrative password resets.</p>
@@ -208,6 +207,23 @@ function renderLandingPage(container) {
   `;
 }
 
+// Global UI Indicators
+window.showLoading = function (title = 'Processing...', message = 'Please wait...') {
+  const overlay = document.getElementById('global-loading-overlay');
+  const titleEl = document.getElementById('global-loading-title');
+  const msgEl = document.getElementById('global-loading-msg');
+  if (overlay) {
+    if (titleEl) titleEl.innerText = title;
+    if (msgEl) msgEl.innerText = message;
+    overlay.style.display = 'flex';
+  }
+};
+
+window.hideLoading = function () {
+  const overlay = document.getElementById('global-loading-overlay');
+  if (overlay) overlay.style.display = 'none';
+};
+
 window.showToast = function (message, type = 'info') {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -226,13 +242,13 @@ window.showModal = function ({ title, bodyHtml, confirmText = 'Confirm', danger 
   if (!container) return;
 
   container.innerHTML = `
-    <div class="modal-backdrop" id="modal-backdrop">
-      <div class="modal-box">
+    <div class="modal-backdrop" id="modal-backdrop" style="position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:center; justify-content:center;">
+      <div class="modal-box" style="background:#fff; border-radius:8px; padding:24px; max-width:440px; width:90%; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
         <h3 style="margin-bottom: 12px;">${title}</h3>
         <div style="margin-bottom: 20px; font-size: 0.95rem; color: var(--text-secondary); line-height: 1.6;">${bodyHtml}</div>
         <div style="display: flex; justify-content: flex-end; gap: 10px;">
-          <button class="btn-secondary" id="modal-cancel-btn">Cancel</button>
-          <button class="${danger ? 'btn-danger' : 'btn-primary'}" id="modal-confirm-btn">${confirmText}</button>
+          <button class="btn-secondary" id="modal-cancel-btn" type="button">Cancel</button>
+          <button class="${danger ? 'btn-danger' : 'btn-primary'}" id="modal-confirm-btn" type="button">${confirmText}</button>
         </div>
       </div>
     </div>
