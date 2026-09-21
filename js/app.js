@@ -5,8 +5,15 @@ window.AppState = {
 };
 
 window.addEventListener('DOMContentLoaded', async () => {
-  await Auth.initAuth();
-  setupNavigationRouting();
+  try {
+    if (window.Auth && typeof window.Auth.initAuth === 'function') {
+      await window.Auth.initAuth();
+    }
+  } catch (err) {
+    console.error('Auth initialization error:', err);
+  } finally {
+    setupNavigationRouting();
+  }
 });
 
 function setupNavigationRouting() {
@@ -44,7 +51,7 @@ function updateNavigationUI() {
 function confirmLogout() {
   window.showModal({
     title: 'Confirm Logout',
-    bodyHtml: 'Are you sure you want to log out of MockOrbit? Any unsaved active screen actions will be closed.',
+    bodyHtml: 'Are you sure you want to log out of MockOrbit? Any active unsaved progress will be closed.',
     confirmText: 'Yes, Log Out',
     danger: true,
     onConfirm: () => {
@@ -143,7 +150,6 @@ async function handleRoute() {
   `;
 }
 
-// Interactive Host Control Hub
 function renderHostDashboard(container) {
   container.innerHTML = `
     <div style="max-width: 960px; margin: 20px auto;">
@@ -153,29 +159,25 @@ function renderHostDashboard(container) {
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
-        <!-- Upload Test Card -->
-        <div class="card" style="cursor:pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; border-top: 4px solid var(--primary-accent);" onclick="window.location.hash='#/host/upload'" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div class="card" style="cursor:pointer; transition: transform 0.15s ease; border-top: 4px solid var(--primary-accent);" onclick="window.location.hash='#/host/upload'">
           <div style="font-size: 2.4rem; margin-bottom: 8px;">📤</div>
           <h3 style="margin-bottom: 6px;">Upload Test</h3>
           <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Parse a question paper PDF or compose questions manually.</p>
         </div>
 
-        <!-- My Tests Card -->
-        <div class="card" style="cursor:pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; border-top: 4px solid #1a73e8;" onclick="window.location.hash='#/host/tests'" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div class="card" style="cursor:pointer; transition: transform 0.15s ease; border-top: 4px solid #1a73e8;" onclick="window.location.hash='#/host/tests'">
           <div style="font-size: 2.4rem; margin-bottom: 8px;">📚</div>
           <h3 style="margin-bottom: 6px;">My Tests</h3>
           <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, copy test keys, and preview tests.</p>
         </div>
 
-        <!-- Candidate Attempts Card -->
-        <div class="card" style="cursor:pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; border-top: 4px solid #f2994a;" onclick="window.location.hash='#/host/all-history'" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div class="card" style="cursor:pointer; transition: transform 0.15s ease; border-top: 4px solid #f2994a;" onclick="window.location.hash='#/host/all-history'">
           <div style="font-size: 2.4rem; margin-bottom: 8px;">📊</div>
           <h3 style="margin-bottom: 6px;">All Attempts</h3>
           <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Track student scores, submissions, accuracy, and pass/fail status.</p>
         </div>
 
-        <!-- Manage Users Card -->
-        <div class="card" style="cursor:pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; border-top: 4px solid #9b51e0;" onclick="window.location.hash='#/host/users'" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div class="card" style="cursor:pointer; transition: transform 0.15s ease; border-top: 4px solid #9b51e0;" onclick="window.location.hash='#/host/users'">
           <div style="font-size: 2.4rem; margin-bottom: 8px;">👥</div>
           <h3 style="margin-bottom: 6px;">Manage Users</h3>
           <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Authorize candidate emails and perform administrative password resets.</p>
@@ -206,7 +208,6 @@ function renderLandingPage(container) {
   `;
 }
 
-// Global UI Helper Functions
 window.showToast = function (message, type = 'info') {
   const container = document.getElementById('toast-container');
   if (!container) return;
