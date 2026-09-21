@@ -243,7 +243,7 @@ window.Host = {
     Host.renderReview(document.getElementById('app-root'));
   },
 
-  // 3. Save to Supabase and Generate Key
+  // 3. Save to Supabase, Generate Key, and Show Formatted Share Options
   async saveAndPublishExam() {
     const draft = window.AppState.parsedExamDraft;
     const title = document.getElementById('cfg-title').value.trim();
@@ -308,7 +308,7 @@ window.Host = {
       marks_unattempted: marksUnatt
     }));
 
-    const { data: insertedSections, error: secErr } = await window.sb
+    const { data: insertedSections } = await window.sb
       .from('sections')
       .insert(secInsertPayload)
       .select();
@@ -321,7 +321,7 @@ window.Host = {
     // Insert Questions & Options
     for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
       const q = draft.questions[qIdx];
-      const { data: qRecord, error: qErr } = await window.sb
+      const { data: qRecord } = await window.sb
         .from('questions')
         .insert({
           test_id: testRecord.id,
@@ -347,21 +347,88 @@ window.Host = {
     // Clean draft
     window.AppState.parsedExamDraft = null;
 
-    // Show generated Key Screen
+    // Formatted invitation text payload
+    const examUrl = `https://mockorbit-cbt.vercel.app/#/instructions/${code}`;
+    const portalUrl = `https://mockorbit-cbt.vercel.app`;
+    const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
+      `📌 *Exam:* ${title}\n` +
+      `⏱️ *Duration:* ${duration} mins\n` +
+      `🎯 *Marking:* +${marksCorrect} for correct, -${marksIncorrect} for incorrect\n` +
+      `🏆 *Passing:* ${passScore} ${passType === 'PERCENT' ? '%' : 'Marks'}\n\n` +
+      `🔑 *Test Key:* ${code}\n` +
+      `🔗 *Direct Test Link:* ${examUrl}\n\n` +
+      `Login to your student account and enter the key at: ${portalUrl}`;
+
+    // Show generated Key Screen with full Share details
     document.getElementById('app-root').innerHTML = `
-      <div class="card" style="max-width:550px; margin:40px auto; text-align:center;">
-        <div style="font-size:2.8rem; margin-bottom:10px;">🎉</div>
+      <div class="card" style="max-width:620px; margin:30px auto; text-align:center;">
+        <div style="font-size:2.8rem; margin-bottom:8px;">🎉</div>
         <h2>Exam Published Successfully!</h2>
-        <p style="color:var(--text-secondary); margin-bottom:24px;">Share this Test Key with authorized students to take the exam.</p>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Your exam is ready for students. Share the details below:</p>
         
-        <div style="background:var(--accent-soft); padding:16px; border-radius:var(--radius-md); font-family:monospace; font-size:2rem; font-weight:700; color:var(--primary-accent); margin-bottom:20px;">
+        <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
           ${code}
         </div>
 
-        <button class="btn-primary" style="margin-bottom:12px; width:100%;" onclick="navigator.clipboard.writeText('${code}'); window.showToast('Copied to clipboard!', 'success');">Copy Test Key</button>
-        <a href="#/host/tests"><button class="btn-secondary" style="width:100%;">View My Tests</button></a>
+        <!-- Formatted Summary Card -->
+        <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
+          <p><strong>Exam Name:</strong> ${title}</p>
+          <p><strong>Duration:</strong> ${duration} Minutes</p>
+          <p><strong>Marking:</strong> +${marksCorrect} / -${marksIncorrect}</p>
+          <p><strong>Test Key:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${code}</span></p>
+          <p style="margin-top:6px; word-break:break-all;"><strong>Direct Link:</strong> <a href="${examUrl}" target="_blank">${examUrl}</a></p>
+        </div>
+
+        <!-- Share Actions -->
+        <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
+          <button class="btn-primary" style="width:100%; padding:11px;" onclick="Host.copyInviteText(\`${encodeURIComponent(shareMessage)}\`)">
+            📋 Copy Complete Student Invitation
+          </button>
+          
+          <div style="display:flex; gap:10px;">
+            <button class="btn-secondary" style="flex:1;" onclick="Host.shareViaWhatsApp(\`${encodeURIComponent(shareMessage)}\`)">
+              💬 Share on WhatsApp
+            </button>
+            <button class="btn-secondary" style="flex:1;" onclick="Host.triggerNativeShare(\`${encodeURIComponent(title)}\`, \`${encodeURIComponent(shareMessage)}\`, \`${encodeURIComponent(examUrl)}\`)">
+              📲 Share / Send
+            </button>
+          </div>
+        </div>
+
+        <a href="#/host/tests"><button class="btn-outline" style="width:100%;">View All My Tests</button></a>
       </div>
     `;
+  },
+
+  copyInviteText(encodedText) {
+    const text = decodeURIComponent(encodedText);
+    navigator.clipboard.writeText(text).then(() => {
+      window.showToast('Complete invitation copied to clipboard!', 'success');
+    }).catch(() => {
+      window.showToast('Could not copy automatically. Please copy manually.', 'warning');
+    });
+  },
+
+  shareViaWhatsApp(encodedText) {
+    const text = decodeURIComponent(encodedText);
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
+  },
+
+  triggerNativeShare(titleEnc, textEnc, urlEnc) {
+    const title = decodeURIComponent(titleEnc);
+    const text = decodeURIComponent(textEnc);
+    const url = decodeURIComponent(urlEnc);
+
+    if (navigator.share) {
+      navigator.share({
+        title: title,
+        text: text,
+        url: url
+      }).catch(() => {});
+    } else {
+      this.copyInviteText(textEnc);
+    }
   },
 
   // 4. My Uploaded Tests List
