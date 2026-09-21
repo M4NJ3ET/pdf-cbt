@@ -27,6 +27,7 @@ function updateNavigationUI() {
 
   if (!window.AppState.user) {
     navLinks.innerHTML = `
+      <a href="#/">Home</a>
       <a href="#/login">Login</a>
       <a href="#/register">Register</a>
     `;
@@ -40,10 +41,11 @@ function updateNavigationUI() {
     <span class="nav-badge" style="${isHost ? 'background:#e6f4ea; color:#137333; font-weight:700; border:1px solid #b7e1cd;' : ''}">
       ${role}
     </span>
-    ${isHost ? `<a href="#/host/dashboard" style="font-weight:600; color:var(--primary-accent);">Host Dashboard</a>` : ''}
+    ${isHost ? `<a href="#/host/dashboard" style="font-weight:600; color:var(--primary-accent);">Host Hub</a>` : ''}
     <a href="#/take-key">Take Test</a>
     <a href="#/my-history">My History</a>
     <a href="#/change-password">Settings</a>
+    <a href="#/register" style="color:var(--text-secondary); font-size:0.9rem;">Register New</a>
     <button class="btn-outline" style="padding:4px 10px; font-size:0.85rem;" onclick="confirmLogout()">Logout</button>
   `;
 }
@@ -51,7 +53,7 @@ function updateNavigationUI() {
 function confirmLogout() {
   window.showModal({
     title: 'Confirm Logout',
-    bodyHtml: 'Are you sure you want to log out of MockOrbit? Any active unsaved progress will be closed.',
+    bodyHtml: 'Are you sure you want to log out of MockOrbit?',
     confirmText: 'Yes, Log Out',
     danger: true,
     onConfirm: () => {
@@ -75,14 +77,12 @@ async function handleRoute() {
     return;
   }
 
-  // Authentication Routes
+  // Authentication Routes (Always accessible)
   if (hash === '#/login') {
-    if (isAuth) { window.location.hash = isHost ? '#/host/dashboard' : '#/take-key'; return; }
     Auth.renderLogin(root);
     return;
   }
   if (hash === '#/register') {
-    if (isAuth) { window.location.hash = '#/take-key'; return; }
     Auth.renderRegister(root);
     return;
   }
@@ -110,7 +110,7 @@ async function handleRoute() {
     return;
   }
 
-  // Student / Candidate Routes
+  // Candidate / Exam Routes
   if (hash === '#/take-key') {
     if (!isAuth) { window.location.hash = '#/login'; return; }
     Exam.renderKeyPrompt(root);
@@ -196,11 +196,11 @@ function renderLandingPage(container) {
       </p>
 
       <div style="display:flex; justify-content:center; gap:14px; flex-wrap:wrap;">
+        <a href="#/take-key"><button class="btn-primary" style="padding:12px 28px; font-size:1rem;">Launch Practice Test</button></a>
         ${window.AppState.user ? `
-          <a href="#/take-key"><button class="btn-primary" style="padding:12px 28px; font-size:1rem;">Launch Practice Test</button></a>
-          ${window.AppState.profile && window.AppState.profile.role === 'HOST' ? `<a href="#/host/dashboard"><button class="btn-secondary" style="padding:12px 28px; font-size:1rem;">Host Control Hub</button></a>` : ''}
+          ${window.AppState.profile && window.AppState.profile.role === 'HOST' ? `<a href="#/host/dashboard"><button class="btn-secondary" style="padding:12px 28px; font-size:1rem;">Host Hub</button></a>` : ''}
         ` : `
-          <a href="#/login"><button class="btn-primary" style="padding:12px 28px; font-size:1rem;">Candidate Login</button></a>
+          <a href="#/login"><button class="btn-secondary" style="padding:12px 28px; font-size:1rem;">Candidate Login</button></a>
           <a href="#/register"><button class="btn-outline" style="padding:12px 28px; font-size:1rem;">Register Account</button></a>
         `}
       </div>
