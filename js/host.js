@@ -1,31 +1,45 @@
 window.Host = {
-  // 1. Upload View
+  // 1. Upload View (Supports PDF Drag-and-Drop & Direct AI JSON Import)
   renderUpload(container) {
     container.innerHTML = `
       <div class="card" style="max-width: 650px; margin: 20px auto;">
-        <h2>Upload Exam PDF</h2>
+        <h2>Create Exam Paper</h2>
         <p style="color:var(--text-secondary); margin-bottom: 20px; font-size:0.95rem;">
-          Select a computer-based question paper PDF. Standard single/multi-column Indian competitive formats are automatically structured.
+          Upload a question paper PDF or paste AI-generated JSON directly.
         </p>
 
-        <div id="drop-zone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 40px 20px; text-align: center; cursor: pointer; background: var(--bg-muted);">
-          <div style="font-size: 2.2rem; margin-bottom: 10px;">📄</div>
+        <!-- Dropzone for PDF -->
+        <div id="drop-zone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: pointer; background: var(--bg-muted); margin-bottom: 20px;">
+          <div style="font-size: 2.2rem; margin-bottom: 8px;">📄</div>
           <p style="font-weight: 600; margin-bottom: 4px;">Click to browse or drop PDF here</p>
           <p style="font-size: 0.85rem; color: var(--text-secondary);">Max size 25MB</p>
           <input type="file" id="pdf-input" accept="application/pdf" style="display: none;" />
         </div>
 
-        <div id="upload-status" style="margin-top: 20px; display: none;">
+        <div id="upload-status" style="margin-top: 15px; margin-bottom: 20px; display: none;">
           <p id="status-label" style="font-size: 0.9rem; font-weight: 600; margin-bottom: 6px;">Extracting content...</p>
           <div style="height: 8px; background: var(--border-color); border-radius: 4px; overflow: hidden;">
             <div id="progress-bar" style="width: 0%; height: 100%; background: var(--primary-accent); transition: width 0.2s ease;"></div>
           </div>
         </div>
 
-        <div id="scanned-warning" style="display:none; margin-top:20px; padding:16px; background: var(--danger-soft); border-radius: var(--radius-sm); border:1px solid var(--danger);">
+        <div id="scanned-warning" style="display:none; margin-bottom:20px; padding:16px; background: var(--danger-soft); border-radius: var(--radius-sm); border:1px solid var(--danger);">
           <p style="font-weight:600; color:var(--danger);">Scanned or Image-only PDF Detected</p>
-          <p style="font-size:0.9rem; margin-top:4px;">This PDF contains no extractable text layer. You can enter your questions manually instead.</p>
+          <p style="font-size:0.9rem; margin-top:4px;">This PDF contains no extractable text layer. You can enter questions manually or paste AI JSON below.</p>
           <button class="btn-primary" style="margin-top:10px;" onclick="Host.startManualEntry()">Enter Questions Manually</button>
+        </div>
+
+        <!-- Divider -->
+        <div style="text-align:center; margin-bottom:20px; position:relative;">
+          <span style="background:#fff; padding:0 12px; color:var(--text-secondary); font-size:0.85rem; font-weight:600;">OR IMPORT AI JSON</span>
+          <hr style="position:relative; top:-10px; z-index:-1; border:none; border-top:1px solid var(--border-color);" />
+        </div>
+
+        <!-- AI JSON Quick Paste Box -->
+        <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px;">
+          <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:6px;">Paste AI-Generated JSON</label>
+          <textarea id="json-paste-input" rows="5" placeholder='{"title": "Exam Title", "questions": [...]}' style="font-family:monospace; font-size:0.85rem; width:100%;"></textarea>
+          <button class="btn-primary" style="margin-top:10px; width:100%; padding:10px;" onclick="Host.loadFromJson()">Load AI Exam Paper</button>
         </div>
       </div>
     `;
@@ -65,6 +79,26 @@ window.Host = {
         }
       }
     };
+  },
+
+  loadFromJson() {
+    const raw = document.getElementById('json-paste-input').value.trim();
+    if (!raw) {
+      window.showToast('Please paste valid JSON first.', 'warning');
+      return;
+    }
+
+    try {
+      const data = JSON.parse(raw);
+      if (!data.questions || !Array.isArray(data.questions)) {
+        throw new Error('Invalid structure: "questions" array is required.');
+      }
+      window.AppState.parsedExamDraft = data;
+      window.showToast(`Loaded ${data.questions.length} questions successfully!`, 'success');
+      window.location.hash = '#/host/review';
+    } catch (e) {
+      window.showToast('JSON Syntax Error: ' + e.message, 'error');
+    }
   },
 
   startManualEntry() {
@@ -159,7 +193,7 @@ window.Host = {
               </div>
               <div class="form-group">
                 <label>Total Duration (Minutes)</label>
-                <input type="number" id="cfg-duration" value="60" min="1" required />
+                <input type="number" id="cfg-duration" value="${draft.duration_minutes || 60}" min="1" required />
               </div>
             </div>
 
@@ -182,13 +216,13 @@ window.Host = {
               <div class="form-group">
                 <label>Passing Score Type</label>
                 <select id="cfg-pass-type">
-                  <option value="PERCENT">Percentage (%)</option>
-                  <option value="MARKS">Absolute Marks</option>
+                  <option value="PERCENT" ${draft.passing_score_type === 'PERCENT' ? 'selected' : ''}>Percentage (%)</option>
+                  <option value="MARKS" ${draft.passing_score_type === 'MARKS' ? 'selected' : ''}>Absolute Marks</option>
                 </select>
               </div>
               <div class="form-group">
                 <label>Passing Threshold</label>
-                <input type="number" step="0.1" id="cfg-pass-score" value="40" required />
+                <input type="number" step="0.1" id="cfg-pass-score" value="${draft.passing_score || 40}" required />
               </div>
             </div>
 
@@ -220,15 +254,15 @@ window.Host = {
   updateExplanation(idx, val) { window.AppState.parsedExamDraft.questions[idx].explanation = val; },
   deleteQuestion(idx) {
     window.AppState.parsedExamDraft.questions.splice(idx, 1);
-    Host.renderReview(document.getElementById('app-root'));
+    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
   },
   addOption(qIdx) {
     window.AppState.parsedExamDraft.questions[qIdx].options.push('New Option');
-    Host.renderReview(document.getElementById('app-root'));
+    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
   },
   removeOption(qIdx, oIdx) {
     window.AppState.parsedExamDraft.questions[qIdx].options.splice(oIdx, 1);
-    Host.renderReview(document.getElementById('app-root'));
+    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
   },
   addQuestionManually() {
     window.AppState.parsedExamDraft.questions.push({
@@ -240,7 +274,7 @@ window.Host = {
       explanation: '',
       warnings: []
     });
-    Host.renderReview(document.getElementById('app-root'));
+    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
   },
 
   // 3. Save to Supabase with Feedback Overlay
@@ -269,7 +303,7 @@ window.Host = {
       let pdfUrl = null;
       if (draft.originalFile) {
         const filePath = `${code}_${draft.originalFile.name}`;
-        const { data: uploadData, error: upErr } = await window.sb.storage
+        const { error: upErr } = await window.sb.storage
           .from('exam-pdfs')
           .upload(filePath, draft.originalFile);
         if (!upErr) pdfUrl = filePath;
@@ -353,7 +387,8 @@ window.Host = {
         `🔗 *Direct Test Link:* ${examUrl}\n\n` +
         `Login to your student account and enter the key at: ${portalUrl}`;
 
-      document.getElementById('app-root').innerHTML = `
+      const targetRoot = document.getElementById('sub-view-root') || document.getElementById('app-root');
+      targetRoot.innerHTML = `
         <div class="card" style="max-width:620px; margin:30px auto; text-align:center;">
           <div style="font-size:2.8rem; margin-bottom:8px;">🎉</div>
           <h2>Exam Published Successfully!</h2>
@@ -489,7 +524,7 @@ window.Host = {
           window.showToast(error.message, 'error');
         } else {
           window.showToast('Test deleted successfully.', 'success');
-          Host.renderMyTests(document.getElementById('app-root'));
+          Host.renderMyTests(document.getElementById('sub-view-root') || document.getElementById('app-root'));
         }
       }
     });
@@ -504,7 +539,6 @@ window.Host = {
       window.sb.from('profiles').select('*').order('created_at', { ascending: false })
     ]);
 
-    const authEmails = authRes.data || [];
     const profiles = profRes.data || [];
 
     container.innerHTML = `
@@ -530,7 +564,7 @@ window.Host = {
             <table style="width:100%; border-collapse:collapse; text-align:left; font-size:0.95rem;">
               <thead>
                 <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary);">
-                  <th style="padding:10px;">Email</th>
+                  <th style="padding:10px;">Name / Email</th>
                   <th style="padding:10px;">Role</th>
                   <th style="padding:10px; text-align:right;">Actions</th>
                 </tr>
@@ -538,7 +572,10 @@ window.Host = {
               <tbody>
                 ${profiles.map(p => `
                   <tr style="border-bottom:1px solid var(--border-color);">
-                    <td style="padding:10px;">${p.email}</td>
+                    <td style="padding:10px;">
+                      <strong>${p.full_name || 'No Name'}</strong>
+                      <div style="font-size:0.82rem; color:var(--text-secondary);">${p.email}</div>
+                    </td>
                     <td style="padding:10px;"><span class="nav-badge">${p.role}</span></td>
                     <td style="padding:10px; text-align:right;">
                       <button class="btn-secondary" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.promptPasswordReset('${p.id}', '${p.email}')">Reset Password</button>
@@ -603,7 +640,7 @@ window.Host = {
           window.showToast(error.message, 'error');
         } else {
           window.showToast('User removed.', 'success');
-          Host.renderUserManager(document.getElementById('app-root'));
+          Host.renderUserManager(document.getElementById('sub-view-root') || document.getElementById('app-root'));
         }
       }
     });
@@ -615,7 +652,7 @@ window.Host = {
 
     const { data: attempts, error } = await window.sb
       .from('attempts')
-      .select('*, tests(title, test_key), profiles(email)')
+      .select('*, tests(title, test_key), profiles(email, full_name)')
       .not('submitted_at', 'is', null)
       .order('submitted_at', { ascending: false });
 
@@ -642,7 +679,10 @@ window.Host = {
             <tbody>
               ${attempts.map(a => `
                 <tr style="border-bottom:1px solid var(--border-color);">
-                  <td style="padding:10px;">${a.profiles ? a.profiles.email : 'Unknown'}</td>
+                  <td style="padding:10px;">
+                    <strong>${a.profiles?.full_name || 'Student'}</strong>
+                    <div style="font-size:0.82rem; color:var(--text-secondary);">${a.profiles?.email || 'Unknown'}</div>
+                  </td>
                   <td style="padding:10px;">${a.tests ? a.tests.title : 'Test'}</td>
                   <td style="padding:10px; font-weight:600;">${a.total_score} /${a.max_score}</td>
                   <td style="padding:10px;">
@@ -676,7 +716,7 @@ window.Host = {
           window.showToast(error.message, 'error');
         } else {
           window.showToast('Attempt record deleted.', 'success');
-          Host.renderAllHistory(document.getElementById('app-root'));
+          Host.renderAllHistory(document.getElementById('sub-view-root') || document.getElementById('app-root'));
         }
       }
     });
