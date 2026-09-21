@@ -27,9 +27,9 @@ function updateNavigationUI() {
 
   if (!window.AppState.user) {
     navLinks.innerHTML = `
-      <a href="#/" class="nav-item">Home</a>
-      <a href="#/login" class="nav-item">Login</a>
-      <a href="#/register" class="nav-item">Register</a>
+      <a href="#/" style="text-decoration:none; color:inherit; font-weight:500;">Home</a>
+      <a href="#/login"><button class="btn-secondary" style="padding:6px 14px; font-size:0.85rem;">Login</button></a>
+      <a href="#/register"><button class="btn-primary" style="padding:6px 14px; font-size:0.85rem;">Register</button></a>
     `;
     return;
   }
@@ -37,15 +37,19 @@ function updateNavigationUI() {
   const role = window.AppState.profile ? window.AppState.profile.role : 'USER';
   const isHost = role === 'HOST';
 
+  // Minimal Header: Role Badge + Logout strictly on right top
   navLinks.innerHTML = `
-    <span class="nav-badge" style="${isHost ? 'background:#e6f4ea; color:#137333; font-weight:700; border:1px solid #b7e1cd;' : 'background:#e8f0fe; color:#1a73e8; font-weight:700; border:1px solid #c2e7ff;'} padding:3px 8px; border-radius:4px; font-size:0.8rem;">
-      ${role}
-    </span>
-    ${isHost ? `<a href="#/host/dashboard" style="font-weight:600; color:var(--primary-accent); text-decoration:none;">Host Hub</a>` : ''}
-    <a href="#/take-key" style="text-decoration:none; color:inherit;">Take Test</a>
-    <a href="#/my-history" style="text-decoration:none; color:inherit;">My History</a>
-    <a href="#/change-password" style="text-decoration:none; color:inherit;">Settings</a>
-    <button class="btn-outline" style="padding:4px 12px; font-size:0.85rem; cursor:pointer;" onclick="confirmLogout()">Logout</button>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="nav-badge" style="${isHost ? 'background:#e6f4ea; color:#137333; border:1px solid #b7e1cd;' : 'background:#e8f0fe; color:#1a73e8; border:1px solid #c2e7ff;'} padding:4px 10px; border-radius:14px; font-weight:700; font-size:0.8rem;">
+        ${role}
+      </span>
+      <span style="font-size:0.9rem; color:var(--text-secondary); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        ${window.AppState.user.email}
+      </span>
+      <button class="btn-outline" style="padding:5px 12px; font-size:0.85rem; font-weight:600;" onclick="confirmLogout()">
+        Logout ⎋
+      </button>
+    </div>
   `;
 }
 
@@ -70,72 +74,71 @@ async function handleRoute() {
   const isAuth = !!window.AppState.user;
   const isHost = window.AppState.profile && window.AppState.profile.role === 'HOST';
 
-  // Landing Page
-  if (hash === '#/' || hash === '') {
-    renderLandingPage(root);
+  // 1. Public Landing / Unauthenticated Views
+  if (!isAuth) {
+    if (hash === '#/' || hash === '') { renderPublicLanding(root); return; }
+    if (hash === '#/login') { Auth.renderLogin(root); return; }
+    if (hash === '#/register') { Auth.renderRegister(root); return; }
+    window.location.hash = '#/login';
     return;
   }
 
-  // Authentication Routes
-  if (hash === '#/login') {
-    Auth.renderLogin(root);
+  // 2. Hub Views (Center Cards, No Left Sidebar)
+  if (hash === '#/' || hash === '' || hash === '#/hub' || hash === '#/host/dashboard') {
+    if (isHost) {
+      renderHostHub(root);
+    } else {
+      renderUserHub(root);
+    }
     return;
   }
-  if (hash === '#/register') {
-    Auth.renderRegister(root);
-    return;
-  }
+
+  // 3. Settings View
   if (hash === '#/change-password') {
-    if (!isAuth) { window.location.hash = '#/login'; return; }
-    Auth.renderChangePassword(root);
+    wrapInAppShell(root, (subContainer) => Auth.renderChangePassword(subContainer), 'settings');
     return;
   }
 
-  // Host Routes
+  // 4. Host Feature Routes (Wrapped with Left Sidebar)
   if (hash.startsWith('#/host/')) {
-    if (!isAuth) { window.location.hash = '#/login'; return; }
     if (!isHost) {
       window.showToast('Host authorization required.', 'error');
-      window.location.hash = '#/take-key';
+      window.location.hash = '#/hub';
       return;
     }
 
-    if (hash === '#/host/dashboard') renderHostDashboard(root);
-    else if (hash === '#/host/upload') Host.renderUpload(root);
-    else if (hash === '#/host/review') Host.renderReview(root);
-    else if (hash === '#/host/tests') Host.renderMyTests(root);
-    else if (hash === '#/host/users') Host.renderUserManager(root);
-    else if (hash === '#/host/all-history') Host.renderAllHistory(root);
+    if (hash === '#/host/upload') wrapInAppShell(root, (el) => Host.renderUpload(el), 'upload');
+    else if (hash === '#/host/review') wrapInAppShell(root, (el) => Host.renderReview(el), 'upload');
+    else if (hash === '#/host/tests') wrapInAppShell(root, (el) => Host.renderMyTests(el), 'tests');
+    else if (hash === '#/host/users') wrapInAppShell(root, (el) => Host.renderUserManager(el), 'users');
+    else if (hash === '#/host/all-history') wrapInAppShell(root, (el) => Host.renderAllHistory(el), 'all-history');
     return;
   }
 
-  // Candidate / Exam Routes
+  // 5. Candidate Feature Routes
   if (hash === '#/take-key') {
-    if (!isAuth) { window.location.hash = '#/login'; return; }
-    Exam.renderKeyPrompt(root);
+    wrapInAppShell(root, (el) => Exam.renderKeyPrompt(el), 'take');
     return;
   }
   if (hash.startsWith('#/instructions/')) {
-    if (!isAuth) { window.location.hash = '#/login'; return; }
     const key = hash.replace('#/instructions/', '').trim();
-    Exam.renderInstructions(root, key);
-    return;
-  }
-  if (hash.startsWith('#/exam/')) {
-    if (!isAuth) { window.location.hash = '#/login'; return; }
-    const testId = hash.replace('#/exam/', '').trim();
-    Exam.startTest(root, testId);
-    return;
-  }
-  if (hash.startsWith('#/results/')) {
-    if (!isAuth) { window.location.hash = '#/login'; return; }
-    const attemptId = hash.replace('#/results/', '').trim();
-    Results.renderResult(root, attemptId);
+    wrapInAppShell(root, (el) => Exam.renderInstructions(el, key), 'take');
     return;
   }
   if (hash === '#/my-history') {
-    if (!isAuth) { window.location.hash = '#/login'; return; }
-    Results.renderMyHistory(root);
+    wrapInAppShell(root, (el) => Results.renderMyHistory(el), 'history');
+    return;
+  }
+  if (hash.startsWith('#/results/')) {
+    const attemptId = hash.replace('#/results/', '').trim();
+    wrapInAppShell(root, (el) => Results.renderResult(el, attemptId), 'history');
+    return;
+  }
+
+  // 6. Active Exam Screen (Full Window, No Sidebar)
+  if (hash.startsWith('#/exam/')) {
+    const testId = hash.replace('#/exam/', '').trim();
+    Exam.startTest(root, testId);
     return;
   }
 
@@ -143,65 +146,144 @@ async function handleRoute() {
   root.innerHTML = `
     <div class="card" style="max-width:440px; margin:40px auto; text-align:center;">
       <h2>404 - Not Found</h2>
-      <p style="color:var(--text-secondary); margin:12px 0;">The requested view does not exist.</p>
-      <a href="#/"><button class="btn-primary">Return Home</button></a>
+      <p style="color:var(--text-secondary); margin:12px 0;">The requested page does not exist.</p>
+      <a href="#/hub"><button class="btn-primary">Return to Hub</button></a>
     </div>
   `;
 }
 
-function renderHostDashboard(container) {
+// Sidebar Shell Wrapper: Automatically wraps sub-views in a sidebar layout
+function wrapInAppShell(root, renderCallback, activeKey) {
+  const isHost = window.AppState.profile && window.AppState.profile.role === 'HOST';
+
+  const hostNav = `
+    <div style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin:16px 0 6px 12px; letter-spacing:0.5px;">Host Controls</div>
+    <a href="#/host/upload" class="side-link ${activeKey === 'upload' ? 'active' : ''}">📤 Upload Test</a>
+    <a href="#/host/tests" class="side-link ${activeKey === 'tests' ? 'active' : ''}">📚 My Tests</a>
+    <a href="#/host/all-history" class="side-link ${activeKey === 'all-history' ? 'active' : ''}">📊 All Attempts</a>
+    <a href="#/host/users" class="side-link ${activeKey === 'users' ? 'active' : ''}">👥 Manage Users</a>
+    <div style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin:16px 0 6px 12px; letter-spacing:0.5px;">Practice</div>
+    <a href="#/take-key" class="side-link ${activeKey === 'take' ? 'active' : ''}">📝 Take Test</a>
+    <a href="#/my-history" class="side-link ${activeKey === 'history' ? 'active' : ''}">📈 My History</a>
+  `;
+
+  const userNav = `
+    <div style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin:16px 0 6px 12px; letter-spacing:0.5px;">Student Portal</div>
+    <a href="#/take-key" class="side-link ${activeKey === 'take' ? 'active' : ''}">📝 Take Test</a>
+    <a href="#/my-history" class="side-link ${activeKey === 'history' ? 'active' : ''}">📈 My History</a>
+    <a href="#/change-password" class="side-link ${activeKey === 'settings' ? 'active' : ''}">⚙️ Account Settings</a>
+  `;
+
+  root.innerHTML = `
+    <div style="display:flex; min-height:calc(100vh - 75px); margin:-20px -20px 0 -20px;">
+      <!-- Dynamic Left Sidebar -->
+      <aside style="width:230px; background:#ffffff; border-right:1px solid var(--border-color); padding:16px 10px; display:flex; flex-direction:column; gap:4px; flex-shrink:0;">
+        <a href="#/hub" class="side-link" style="font-weight:700; color:var(--primary-accent); margin-bottom:10px;">
+          🏠 Home Hub
+        </a>
+        ${isHost ? hostNav : userNav}
+      </aside>
+
+      <!-- Main Content Area -->
+      <main style="flex:1; padding:24px 28px; overflow-y:auto;" id="sub-view-root">
+        <!-- Rendered by callback -->
+      </main>
+    </div>
+  `;
+
+  const subRoot = document.getElementById('sub-view-root');
+  renderCallback(subRoot);
+}
+
+// 1. Host Card Hub (Shown on Home/Dashboard)
+function renderHostHub(container) {
   container.innerHTML = `
-    <div style="max-width: 960px; margin: 20px auto;">
-      <div style="margin-bottom: 24px;">
-        <h2 style="font-size: 1.8rem; margin-bottom: 6px;">Host Control Hub</h2>
-        <p style="color: var(--text-secondary);">Manage exams, question papers, candidate attempts, and user authorizations.</p>
+    <div style="max-width: 980px; margin: 30px auto; padding: 0 16px;">
+      <div style="margin-bottom: 28px;">
+        <h1 style="font-size: 2rem; margin-bottom: 6px; font-weight:700;">Host Control Hub</h1>
+        <p style="color: var(--text-secondary); font-size:1rem;">Manage exams, question papers, candidate attempts, and user authorizations.</p>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
-        <div class="card" style="cursor:pointer; border-top: 4px solid var(--primary-accent);" onclick="window.location.hash='#/host/upload'">
-          <div style="font-size: 2.4rem; margin-bottom: 8px;">📤</div>
-          <h3 style="margin-bottom: 6px;">Upload Test</h3>
-          <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Parse a question paper PDF or compose questions manually.</p>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
+        <!-- Upload Test Card -->
+        <div class="card hub-card" style="cursor:pointer; border-top: 5px solid #137333;" onclick="window.location.hash='#/host/upload'">
+          <div style="font-size: 2.6rem; margin-bottom: 12px;">📤</div>
+          <h3 style="margin-bottom: 8px;">Upload Test</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Parse a question paper PDF or compose questions manually.</p>
         </div>
 
-        <div class="card" style="cursor:pointer; border-top: 4px solid #1a73e8;" onclick="window.location.hash='#/host/tests'">
-          <div style="font-size: 2.4rem; margin-bottom: 8px;">📚</div>
-          <h3 style="margin-bottom: 6px;">My Tests</h3>
-          <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, copy test keys, and preview tests.</p>
+        <!-- My Tests Card -->
+        <div class="card hub-card" style="cursor:pointer; border-top: 5px solid #1a73e8;" onclick="window.location.hash='#/host/tests'">
+          <div style="font-size: 2.6rem; margin-bottom: 12px;">📚</div>
+          <h3 style="margin-bottom: 8px;">My Tests</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, copy test keys, and preview tests.</p>
         </div>
 
-        <div class="card" style="cursor:pointer; border-top: 4px solid #f2994a;" onclick="window.location.hash='#/host/all-history'">
-          <div style="font-size: 2.4rem; margin-bottom: 8px;">📊</div>
-          <h3 style="margin-bottom: 6px;">All Attempts</h3>
-          <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Track student scores, submissions, accuracy, and pass/fail status.</p>
+        <!-- All Attempts Card -->
+        <div class="card hub-card" style="cursor:pointer; border-top: 5px solid #f2994a;" onclick="window.location.hash='#/host/all-history'">
+          <div style="font-size: 2.6rem; margin-bottom: 12px;">📊</div>
+          <h3 style="margin-bottom: 8px;">All Attempts</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Track candidate scores, submissions, accuracy, and pass/fail status.</p>
         </div>
 
-        <div class="card" style="cursor:pointer; border-top: 4px solid #9b51e0;" onclick="window.location.hash='#/host/users'">
-          <div style="font-size: 2.4rem; margin-bottom: 8px;">👥</div>
-          <h3 style="margin-bottom: 6px;">Manage Users</h3>
-          <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">Authorize candidate emails and perform administrative password resets.</p>
+        <!-- Manage Users Card -->
+        <div class="card hub-card" style="cursor:pointer; border-top: 5px solid #9b51e0;" onclick="window.location.hash='#/host/users'">
+          <div style="font-size: 2.6rem; margin-bottom: 12px;">👥</div>
+          <h3 style="margin-bottom: 8px;">Manage Users</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Authorize candidate emails and perform administrative password resets.</p>
         </div>
       </div>
     </div>
   `;
 }
 
-function renderLandingPage(container) {
+// 2. Candidate / User Card Hub (Shown on Home/Dashboard)
+function renderUserHub(container) {
   container.innerHTML = `
-    <div style="max-width: 800px; margin: 40px auto; text-align:center;">
-      <h1 style="font-size: 2.4rem; margin-bottom: 12px; color: var(--text-main);">Welcome to MockOrbit</h1>
+    <div style="max-width: 860px; margin: 40px auto; padding: 0 16px;">
+      <div style="margin-bottom: 28px; text-align:left;">
+        <h1 style="font-size: 2rem; margin-bottom: 6px; font-weight:700;">Candidate Portal</h1>
+        <p style="color: var(--text-secondary); font-size:1rem;">Launch practice tests using your host's test key or review your performance history.</p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px;">
+        <!-- Take Test Card -->
+        <div class="card hub-card" style="cursor:pointer; border-top: 5px solid var(--primary-accent);" onclick="window.location.hash='#/take-key'">
+          <div style="font-size: 2.8rem; margin-bottom: 12px;">📝</div>
+          <h3 style="margin-bottom: 8px;">Take Practice Test</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Enter an exam test key provided by your host to launch your test.</p>
+        </div>
+
+        <!-- My History Card -->
+        <div class="card hub-card" style="cursor:pointer; border-top: 5px solid #1a73e8;" onclick="window.location.hash='#/my-history'">
+          <div style="font-size: 2.8rem; margin-bottom: 12px;">📈</div>
+          <h3 style="margin-bottom: 8px;">My Performance History</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Review past scorecards, accuracy, detailed explanations, and solutions.</p>
+        </div>
+
+        <!-- Settings Card -->
+        <div class="card hub-card" style="cursor:pointer; border-top: 5px solid #9b51e0;" onclick="window.location.hash='#/change-password'">
+          <div style="font-size: 2.8rem; margin-bottom: 12px;">⚙️</div>
+          <h3 style="margin-bottom: 8px;">Account Settings</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Update your login password and manage account credentials.</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// 3. Public Landing
+function renderPublicLanding(container) {
+  container.innerHTML = `
+    <div style="max-width: 800px; margin: 50px auto; text-align:center;">
+      <h1 style="font-size: 2.4rem; margin-bottom: 14px; color: var(--text-main);">Welcome to MockOrbit</h1>
       <p style="font-size: 1.15rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 30px auto; line-height: 1.6;">
-        Standard Indian competitive Computer-Based Test practice environment. Parse PDF question papers, simulate real exam conditions, and get instant score evaluation.
+        Indian competitive Computer-Based Test practice environment. Parse PDF question papers, simulate real exam conditions, and get instant scorecards.
       </p>
 
       <div style="display:flex; justify-content:center; gap:14px; flex-wrap:wrap;">
-        <a href="#/take-key"><button class="btn-primary" style="padding:12px 28px; font-size:1rem;">Launch Practice Test</button></a>
-        ${window.AppState.user ? `
-          ${window.AppState.profile && window.AppState.profile.role === 'HOST' ? `<a href="#/host/dashboard"><button class="btn-secondary" style="padding:12px 28px; font-size:1rem;">Host Hub</button></a>` : ''}
-        ` : `
-          <a href="#/login"><button class="btn-secondary" style="padding:12px 28px; font-size:1rem;">Candidate Login</button></a>
-          <a href="#/register"><button class="btn-outline" style="padding:12px 28px; font-size:1rem;">Register Account</button></a>
-        `}
+        <a href="#/login"><button class="btn-primary" style="padding:12px 30px; font-size:1rem;">Candidate / Host Login</button></a>
+        <a href="#/register"><button class="btn-outline" style="padding:12px 30px; font-size:1rem;">Register Account</button></a>
       </div>
     </div>
   `;
