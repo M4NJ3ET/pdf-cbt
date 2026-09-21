@@ -2,16 +2,15 @@ window.Exam = {
   currentTest: null,
   questions: [],
   sections: [],
-  answers: {}, // questionId -> selectedOptionIndex (null if unattempted)
-  reviewMarked: {}, // questionId -> boolean
-  visited: {}, // questionId -> boolean (visited questions tracker)
+  answers: {},
+  reviewMarked: {},
+  visited: {},
   currentIndex: 0,
   timerInterval: null,
   secondsRemaining: 0,
   attemptId: null,
   isPaused: false,
 
-  // 1. Enter Key Prompt View
   renderKeyPrompt(container) {
     container.innerHTML = `
       <div class="card" style="max-width: 460px; margin: 40px auto; text-align:center;">
@@ -33,7 +32,6 @@ window.Exam = {
     };
   },
 
-  // 2. Pre-Test Instructions View
   async renderInstructions(container, testKey) {
     container.innerHTML = `<div class="card"><p>Loading exam instructions...</p></div>`;
 
@@ -57,7 +55,6 @@ window.Exam = {
     const qCount = test.questions && test.questions[0] ? test.questions[0].count : 0;
     const defaultSec = test.sections && test.sections[0] ? test.sections[0] : { marks_correct: 1, marks_incorrect: 0.25 };
 
-    // Check for an existing in-progress session
     const storageKey = `cbt_attempt_${test.id}_${window.AppState.user.id}`;
     const savedState = localStorage.getItem(storageKey);
     let resumeNotice = '';
@@ -69,7 +66,7 @@ window.Exam = {
         resumeNotice = `
           <div style="background:#e8f0fe; border:1px solid #1a73e8; border-radius:var(--radius-sm); padding:12px; margin-bottom:20px; text-align:left;">
             <strong>📌 Resume Saved Progress Available</strong>
-            <p style="font-size:0.9rem; margin-top:4px;">You have an active in-progress attempt for this exam with ~${remMins} minutes remaining. Clicking begin will restore your exact answers and timer state.</p>
+            <p style="font-size:0.9rem; margin-top:4px;">You have an active in-progress attempt for this exam with ~${remMins} minutes remaining.</p>
           </div>
         `;
       } catch (e) {}
@@ -105,7 +102,6 @@ window.Exam = {
     `;
   },
 
-  // 3. Exam Engine Initialization
   async startTest(container, testId) {
     container.innerHTML = `<div class="card"><p>Preparing question paper...</p></div>`;
 
@@ -135,7 +131,6 @@ window.Exam = {
     this.visited = {};
     this.isPaused = false;
 
-    // Restore state from localStorage if active attempt exists
     const storageKey = `cbt_attempt_${testId}_${window.AppState.user.id}`;
     const savedState = localStorage.getItem(storageKey);
 
@@ -185,7 +180,6 @@ window.Exam = {
     }));
   },
 
-  // 4. Save for Later / Interrupt Recovery
   saveForLater() {
     this.saveLocalProgress();
     clearInterval(this.timerInterval);
@@ -194,9 +188,9 @@ window.Exam = {
     window.showModal({
       title: 'Progress Saved',
       bodyHtml: `
-        <p>Your exam progress, current answers, and remaining time have been saved safely.</p>
+        <p>Your current answers and exact remaining time are saved safely.</p>
         <p style="margin-top:8px; font-size:0.9rem; color:var(--text-secondary);">
-          You can resume this exam anytime by returning to <strong>Take Test</strong> and entering test key: 
+          You can resume this test anytime by navigating to <strong>Take Test</strong> and entering key: 
           <strong style="color:var(--primary-accent); font-family:monospace;">${this.currentTest.test_key}</strong>.
         </p>
       `,
@@ -207,11 +201,9 @@ window.Exam = {
     });
   },
 
-  // 5. CBT Layout Renderer
   renderExamInterface(container) {
     container.innerHTML = `
       <div class="exam-layout" style="position:relative;">
-        <!-- Break / Pause Fullscreen Overlay -->
         <div id="exam-pause-overlay" style="display:none; position:absolute; inset:0; background:rgba(255, 255, 255, 0.96); backdrop-filter:blur(6px); z-index:999; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px;">
           <div style="font-size:3.5rem; margin-bottom:12px;">☕</div>
           <h2 style="font-size:1.8rem; margin-bottom:8px;">Exam Paused</h2>
@@ -226,7 +218,6 @@ window.Exam = {
           </button>
         </div>
 
-        <!-- Main Exam Column -->
         <div class="exam-main">
           <div class="exam-header">
             <div>
@@ -234,8 +225,8 @@ window.Exam = {
               <div id="section-bar" style="margin-top:6px; display:flex; gap:8px;"></div>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
-              <button class="btn-secondary" style="padding:6px 10px; font-size:0.85rem;" title="Temporary pause during session" onclick="Exam.pauseTest()">☕ Break</button>
-              <button class="btn-outline" style="padding:6px 10px; font-size:0.85rem;" title="Save and resume later from another session or device" onclick="Exam.saveForLater()">💾 Save for Later</button>
+              <button class="btn-secondary" style="padding:6px 10px; font-size:0.85rem;" onclick="Exam.pauseTest()">☕ Break</button>
+              <button class="btn-outline" style="padding:6px 10px; font-size:0.85rem;" onclick="Exam.saveForLater()">💾 Save for Later</button>
               <div id="exam-timer" class="timer-box">00:00:00</div>
             </div>
           </div>
@@ -255,7 +246,6 @@ window.Exam = {
           </div>
         </div>
 
-        <!-- Sidebar / Palette -->
         <div class="exam-sidebar">
           <div class="palette-legend" id="legend-counts-target"></div>
           <div class="palette-grid" id="palette-target"></div>
@@ -346,13 +336,7 @@ window.Exam = {
     const legendTarget = document.getElementById('legend-counts-target');
     if (!paletteTarget) return;
 
-    let counts = {
-      answered: 0,
-      unanswered: 0,
-      notVisited: 0,
-      marked: 0,
-      markedAnswered: 0
-    };
+    let counts = { answered: 0, unanswered: 0, notVisited: 0, marked: 0, markedAnswered: 0 };
 
     paletteTarget.innerHTML = this.questions.map((q, idx) => {
       let stateClass = 'p-not-visited';
@@ -469,13 +453,7 @@ window.Exam = {
     const remHrs = Math.floor(this.secondsRemaining / 3600);
     const remMins = Math.floor((this.secondsRemaining % 3600) / 60);
     const remSecs = this.secondsRemaining % 60;
-
-    let timeString = '';
-    if (remHrs > 0) {
-      timeString = `${remHrs}h ${remMins}m ${remSecs}s`;
-    } else {
-      timeString = `${remMins}m ${remSecs}s`;
-    }
+    const timeString = remHrs > 0 ? `${remHrs}h ${remMins}m ${remSecs}s` : `${remMins}m ${remSecs}s`;
 
     window.showModal({
       title: 'Submit Exam Confirmation',
@@ -492,13 +470,16 @@ window.Exam = {
         </div>
       `,
       confirmText: 'Yes, Submit Final Exam',
-      onConfirm: () => this.submitExam()
+      onConfirm: () => {
+        this.submitExam();
+      }
     });
   },
 
   async submitExam() {
     clearInterval(this.timerInterval);
     window.onbeforeunload = null;
+    window.showLoading('Submitting Responses...', 'Calculating scores and recording your attempt in database...');
 
     const storageKey = `cbt_attempt_${this.currentTest.id}_${window.AppState.user.id}`;
     localStorage.removeItem(storageKey);
@@ -557,30 +538,37 @@ window.Exam = {
 
     const timeSpent = (this.currentTest.duration_minutes * 60) - this.secondsRemaining;
 
-    await window.sb.from('attempt_answers').insert(answerInserts);
+    try {
+      await window.sb.from('attempt_answers').insert(answerInserts);
 
-    await window.sb
-      .from('attempts')
-      .update({
-        submitted_at: new Date().toISOString(),
-        total_score: totalScore,
-        max_score: maxScore,
-        correct_count: correctCount,
-        incorrect_count: incorrectCount,
-        unattempted_count: unattemptedCount,
-        accuracy_percentage: accuracy,
-        time_taken_seconds: timeSpent,
-        is_passed: isPassed
-      })
-      .eq('id', this.attemptId);
+      await window.sb
+        .from('attempts')
+        .update({
+          submitted_at: new Date().toISOString(),
+          total_score: totalScore,
+          max_score: maxScore,
+          correct_count: correctCount,
+          incorrect_count: incorrectCount,
+          unattempted_count: unattemptedCount,
+          accuracy_percentage: accuracy,
+          time_taken_seconds: timeSpent,
+          is_passed: isPassed
+        })
+        .eq('id', this.attemptId);
 
-    document.getElementById('app-root').innerHTML = `
-      <div class="card" style="max-width:520px; margin:60px auto; text-align:center;">
-        <div style="font-size:3rem; margin-bottom:12px;">✅</div>
-        <h2>Test Submitted Successfully</h2>
-        <p style="color:var(--text-secondary); margin-bottom:24px;">Your responses have been recorded and evaluated.</p>
-        <a href="#/results/${this.attemptId}"><button class="btn-primary" style="width:100%; padding:12px; font-size:1.1rem;">Show Results</button></a>
-      </div>
-    `;
+      window.hideLoading();
+
+      document.getElementById('app-root').innerHTML = `
+        <div class="card" style="max-width:520px; margin:60px auto; text-align:center;">
+          <div style="font-size:3rem; margin-bottom:12px;">✅</div>
+          <h2>Test Submitted Successfully</h2>
+          <p style="color:var(--text-secondary); margin-bottom:24px;">Your responses have been recorded and evaluated.</p>
+          <a href="#/results/${this.attemptId}"><button class="btn-primary" style="width:100%; padding:12px; font-size:1.1rem;">Show Results</button></a>
+        </div>
+      `;
+    } catch (err) {
+      window.hideLoading();
+      window.showToast('Submission error: ' + err.message, 'error');
+    }
   }
 };
