@@ -4,6 +4,7 @@ window.Exam = {
   sections: [],
   answers: {}, // questionId -> selectedOptionIndex (null if unattempted)
   reviewMarked: {}, // questionId -> boolean
+  visited: {}, // questionId -> boolean (visited questions tracker)
   currentIndex: 0,
   timerInterval: null,
   secondsRemaining: 0,
@@ -85,7 +86,6 @@ window.Exam = {
   async startTest(container, testId) {
     container.innerHTML = `<div class="card"><p>Preparing question paper...</p></div>`;
 
-    // Fetch Full Test, Sections, Questions, and Options
     const { data: test, error: tErr } = await window.sb
       .from('tests')
       .select('*, sections(*)')
@@ -109,6 +109,7 @@ window.Exam = {
     this.currentIndex = 0;
     this.answers = {};
     this.reviewMarked = {};
+    this.visited = {};
 
     // Restore state from localStorage if active attempt exists
     const storageKey = `cbt_attempt_${testId}_${window.AppState.user.id}`;
@@ -119,16 +120,16 @@ window.Exam = {
         const parsed = JSON.parse(savedState);
         this.answers = parsed.answers || {};
         this.reviewMarked = parsed.reviewMarked || {};
+        this.visited = parsed.visited || {};
         this.secondsRemaining = parsed.secondsRemaining;
         this.attemptId = parsed.attemptId;
       } catch (e) {
-        this.initNewAttempt(test);
+        await this.initNewAttempt(test);
       }
     } else {
       await this.initNewAttempt(test);
     }
 
-    // Window navigation safety warning
     window.onbeforeunload = () => "Your exam answers might not be submitted if you leave now.";
 
     this.renderExamInterface(container);
@@ -154,6 +155,7 @@ window.Exam = {
     localStorage.setItem(storageKey, JSON.stringify({
       answers: this.answers,
       reviewMarked: this.reviewMarked,
+      visited: this.visited,
       secondsRemaining: this.secondsRemaining,
       attemptId: this.attemptId
     }));
@@ -208,6 +210,7 @@ window.Exam = {
 
   renderCurrentQuestion() {
     const q = this.questions[this.currentIndex];
+    this.visited[q.id] = true; // Mark opened question as visited
     const target = document.getElementById('question-render-target');
     const selectedOpt = this.answers[q.id];
 
@@ -281,6 +284,7 @@ window.Exam = {
       let stateClass = 'p-not-visited';
       const isAnswered = this.answers[q.id] !== undefined;
       const isMarked = this.reviewMarked[q.id] === true;
+      const isVisited = this.visited[q.id] === true;
 
       if (isMarked && isAnswered) {
         stateClass = 'p-marked-answered';
@@ -288,8 +292,10 @@ window.Exam = {
         stateClass = 'p-marked';
       } else if (isAnswered) {
         stateClass = 'p-answered';
-      } else if (idx <= this.currentIndex) {
+      } else if (isVisited) {
         stateClass = 'p-unanswered';
+      } else {
+        stateClass = 'p-not-visited';
       }
 
       const isCurrent = idx === this.currentIndex;
@@ -359,11 +365,9 @@ window.Exam = {
     clearInterval(this.timerInterval);
     window.onbeforeunload = null;
 
-    // Remove local recovery record
     const storageKey = `cbt_attempt_${this.currentTest.id}_${window.AppState.user.id}`;
     localStorage.removeItem(storageKey);
 
-    // Calculate score
     let totalScore = 0;
     let maxScore = 0;
     let correctCount = 0;
@@ -371,8 +375,6 @@ window.Exam = {
     let unattemptedCount = 0;
 
     const answerInserts = [];
-
-    // Map default marks
     const defaultSec = this.sections[0] || { marks_correct: 1.0, marks_incorrect: 0.25, marks_unattempted: 0 };
 
     this.questions.forEach(q => {
@@ -420,10 +422,8 @@ window.Exam = {
 
     const timeSpent = (this.currentTest.duration_minutes * 60) - this.secondsRemaining;
 
-    // Insert answers
     await window.sb.from('attempt_answers').insert(answerInserts);
 
-    // Update attempt
     await window.sb
       .from('attempts')
       .update({
@@ -439,7 +439,6 @@ window.Exam = {
       })
       .eq('id', this.attemptId);
 
-    // Render Submission Complete Screen
     document.getElementById('app-root').innerHTML = `
       <div class="card" style="max-width:520px; margin:60px auto; text-align:center;">
         <div style="font-size:3rem; margin-bottom:12px;">✅</div>
