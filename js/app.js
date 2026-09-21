@@ -105,7 +105,7 @@ async function router() {
     }
     root.innerHTML = `
       <div class="card" style="text-align:center; padding: 60px 24px;">
-        <h1 style="font-size:2.2rem; margin-bottom:12px;">Standard CBT Practice Platform</h1>
+        <h1 style="font-size:2.2rem; margin-bottom:12px;">Welcome to MockOrbit</h1>
         <p style="color:var(--text-secondary); max-width:620px; margin:0 auto 28px;">
           Practice high-stakes exams in a realistic testing environment with exact timekeeping, question status palettes, instant evaluations, and solutions.
         </p>
