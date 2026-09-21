@@ -57,10 +57,30 @@ window.Exam = {
     const qCount = test.questions && test.questions[0] ? test.questions[0].count : 0;
     const defaultSec = test.sections && test.sections[0] ? test.sections[0] : { marks_correct: 1, marks_incorrect: 0.25 };
 
+    // Check for an existing in-progress session
+    const storageKey = `cbt_attempt_${test.id}_${window.AppState.user.id}`;
+    const savedState = localStorage.getItem(storageKey);
+    let resumeNotice = '';
+
+    if (savedState) {
+      try {
+        const parsed = JSON.parse(savedState);
+        const remMins = Math.floor(parsed.secondsRemaining / 60);
+        resumeNotice = `
+          <div style="background:#e8f0fe; border:1px solid #1a73e8; border-radius:var(--radius-sm); padding:12px; margin-bottom:20px; text-align:left;">
+            <strong>📌 Resume Saved Progress Available</strong>
+            <p style="font-size:0.9rem; margin-top:4px;">You have an active in-progress attempt for this exam with ~${remMins} minutes remaining. Clicking begin will restore your exact answers and timer state.</p>
+          </div>
+        `;
+      } catch (e) {}
+    }
+
     container.innerHTML = `
       <div class="card" style="max-width: 780px; margin: 20px auto;">
         <h2>${test.title}</h2>
         <p style="color:var(--text-secondary); margin-bottom: 20px;">Please read the following instructions carefully before starting the exam.</p>
+
+        ${resumeNotice}
 
         <div style="background:var(--bg-muted); padding:16px; border-radius:var(--radius-md); margin-bottom:20px;">
           <p><strong>Duration:</strong> ${test.duration_minutes} minutes</p>
@@ -78,7 +98,9 @@ window.Exam = {
           <div class="legend-item"><div class="legend-box p-marked-answered"></div> Answered & Marked for review.</div>
         </div>
 
-        <button class="btn-primary" style="width:100%; padding:14px; font-size:1.1rem;" onclick="window.location.hash='#/exam/${test.id}'">I am ready to begin</button>
+        <button class="btn-primary" style="width:100%; padding:14px; font-size:1.1rem;" onclick="window.location.hash='#/exam/${test.id}'">
+          ${savedState ? 'Resume In-Progress Exam' : 'I am ready to begin'}
+        </button>
       </div>
     `;
   },
@@ -163,7 +185,29 @@ window.Exam = {
     }));
   },
 
-  // 4. CBT Layout Renderer
+  // 4. Save for Later / Interrupt Recovery
+  saveForLater() {
+    this.saveLocalProgress();
+    clearInterval(this.timerInterval);
+    window.onbeforeunload = null;
+
+    window.showModal({
+      title: 'Progress Saved',
+      bodyHtml: `
+        <p>Your exam progress, current answers, and remaining time have been saved safely.</p>
+        <p style="margin-top:8px; font-size:0.9rem; color:var(--text-secondary);">
+          You can resume this exam anytime by returning to <strong>Take Test</strong> and entering test key: 
+          <strong style="color:var(--primary-accent); font-family:monospace;">${this.currentTest.test_key}</strong>.
+        </p>
+      `,
+      confirmText: 'Exit to Dashboard',
+      onConfirm: () => {
+        window.location.hash = '#/take-key';
+      }
+    });
+  },
+
+  // 5. CBT Layout Renderer
   renderExamInterface(container) {
     container.innerHTML = `
       <div class="exam-layout" style="position:relative;">
@@ -189,8 +233,9 @@ window.Exam = {
               <strong style="font-size:1.1rem;">${this.currentTest.title}</strong>
               <div id="section-bar" style="margin-top:6px; display:flex; gap:8px;"></div>
             </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <button class="btn-secondary" style="padding:6px 12px; font-size:0.85rem;" onclick="Exam.pauseTest()">☕ Take a Break</button>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button class="btn-secondary" style="padding:6px 10px; font-size:0.85rem;" title="Temporary pause during session" onclick="Exam.pauseTest()">☕ Break</button>
+              <button class="btn-outline" style="padding:6px 10px; font-size:0.85rem;" title="Save and resume later from another session or device" onclick="Exam.saveForLater()">💾 Save for Later</button>
               <div id="exam-timer" class="timer-box">00:00:00</div>
             </div>
           </div>
@@ -352,7 +397,6 @@ window.Exam = {
     }
   },
 
-  // 5. Break / Pause Engine
   pauseTest() {
     this.isPaused = true;
     clearInterval(this.timerInterval);
