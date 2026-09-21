@@ -28,7 +28,6 @@ function updateNavigationUI() {
   const hash = window.location.hash || '#/';
   const isAuth = !!window.AppState.user;
 
-  // 1. When on Login or Register page: show only a clean "← Home" button
   if (hash === '#/login' || hash === '#/register') {
     navLinks.innerHTML = `
       <a href="#/" class="btn-secondary" style="padding:6px 14px; text-decoration:none; font-size:0.85rem; font-weight:600;">
@@ -38,28 +37,35 @@ function updateNavigationUI() {
     return;
   }
 
-  // 2. When Unauthenticated on Public Home: show nothing in the header (options are already front-and-center)
   if (!isAuth) {
     navLinks.innerHTML = ``;
     return;
   }
 
-  // 3. Authenticated: Show Name/Email, Role Badge, and Logout strictly on the top-right
+  // Profile Hover Dropdown Setup
   const role = window.AppState.profile ? window.AppState.profile.role : 'USER';
   const isHost = role === 'HOST';
   const displayName = window.AppState.profile?.full_name || window.AppState.user.email;
 
   navLinks.innerHTML = `
-    <div style="display:flex; align-items:center; gap:12px;">
-      <span class="nav-badge" style="${isHost ? 'background:#e6f4ea; color:#137333; border:1px solid #b7e1cd;' : 'background:#e8f0fe; color:#1a73e8; border:1px solid #c2e7ff;'} padding:4px 10px; border-radius:12px; font-weight:700; font-size:0.78rem;">
-        ${role}
-      </span>
-      <span style="font-size:0.9rem; color:var(--text-secondary); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500;">
-        ${displayName}
-      </span>
-      <button class="btn-outline" style="padding:6px 14px; font-size:0.85rem; font-weight:600;" onclick="confirmLogout()">
-        Logout ⎋
-      </button>
+    <div class="profile-menu">
+      <div class="profile-menu-trigger">
+        <span class="nav-badge" style="${isHost ? 'background:#e6f4ea; color:#137333; border:1px solid #b7e1cd;' : 'background:#e8f0fe; color:#1a73e8; border:1px solid #c2e7ff;'} padding:4px 10px; border-radius:12px; font-weight:700; font-size:0.78rem;">
+          ${role}
+        </span>
+        <span style="font-size:0.95rem; font-weight:600; color:var(--text-main);">${displayName}</span>
+        <span style="font-size:0.7rem; color:var(--text-secondary); margin-left:4px;">▼</span>
+      </div>
+      
+      <div class="profile-dropdown">
+        <a href="#/settings">
+          <span style="font-size:1.1rem;">⚙️</span> Account Settings
+        </a>
+        <div style="height:1px; background:var(--border-color); margin: 4px 0;"></div>
+        <button onclick="confirmLogout()" style="color:var(--danger);">
+          <span style="font-size:1.1rem;">🚪</span> Sign Out
+        </button>
+      </div>
     </div>
   `;
 }
@@ -85,7 +91,7 @@ async function handleRoute() {
   const isAuth = !!window.AppState.user;
   const isHost = window.AppState.profile && window.AppState.profile.role === 'HOST';
 
-  // Public Landing / Auth Views
+  // Public / Auth Views
   if (!isAuth) {
     if (hash === '#/' || hash === '') { renderPublicLanding(root); return; }
     if (hash === '#/login') { Auth.renderLogin(root); return; }
@@ -94,20 +100,20 @@ async function handleRoute() {
     return;
   }
 
-  // Home Hub (Center Cards only, No left sidebar)
+  // Home Hub
   if (hash === '#/' || hash === '' || hash === '#/hub' || hash === '#/host/dashboard') {
     if (isHost) renderHostHub(root);
     else renderUserHub(root);
     return;
   }
 
-  // Settings View (Profile Name & Password)
+  // Settings
   if (hash === '#/settings' || hash === '#/change-password') {
     wrapInAppShell(root, (el) => Auth.renderSettings(el), 'settings');
     return;
   }
 
-  // Host Section Views (Wrapped in Left Sidebar)
+  // Host Sidebar Views
   if (hash.startsWith('#/host/')) {
     if (!isHost) {
       window.showToast('Host authorization required.', 'error');
@@ -123,7 +129,7 @@ async function handleRoute() {
     return;
   }
 
-  // Candidate Section Views (Wrapped in Left Sidebar)
+  // Candidate Sidebar Views
   if (hash === '#/take-key') {
     wrapInAppShell(root, (el) => Exam.renderKeyPrompt(el), 'take');
     return;
@@ -143,14 +149,14 @@ async function handleRoute() {
     return;
   }
 
-  // Active Exam Simulation (Fullscreen, No sidebar distraction)
+  // Active Exam
   if (hash.startsWith('#/exam/')) {
     const testId = hash.replace('#/exam/', '').trim();
     Exam.startTest(root, testId);
     return;
   }
 
-  // 404 Fallback
+  // 404
   root.innerHTML = `
     <div class="card" style="max-width:440px; margin:40px auto; text-align:center;">
       <h2>404 - Not Found</h2>
@@ -160,52 +166,65 @@ async function handleRoute() {
   `;
 }
 
-// Sidebar Shell Wrapper: Builds the left navigation bar with Home Hub at top and Logout pinned at bottom
+// Collapsible Sidebar Wrapper
 function wrapInAppShell(root, renderCallback, activeKey) {
   const isHost = window.AppState.profile && window.AppState.profile.role === 'HOST';
 
   const hostNav = `
     <div class="side-group-title">Host Controls</div>
-    <a href="#/host/upload" class="side-link ${activeKey === 'upload' ? 'active' : ''}">📤 Upload Test</a>
-    <a href="#/host/tests" class="side-link ${activeKey === 'tests' ? 'active' : ''}">📚 My Tests</a>
-    <a href="#/host/all-history" class="side-link ${activeKey === 'all-history' ? 'active' : ''}">📊 All Attempts</a>
-    <a href="#/host/users" class="side-link ${activeKey === 'users' ? 'active' : ''}">👥 Manage Users</a>
+    <a href="#/host/upload" class="side-link ${activeKey === 'upload' ? 'active' : ''}">
+      <span class="icon">📤</span><span class="text">Upload Test</span>
+    </a>
+    <a href="#/host/tests" class="side-link ${activeKey === 'tests' ? 'active' : ''}">
+      <span class="icon">📚</span><span class="text">My Tests</span>
+    </a>
+    <a href="#/host/all-history" class="side-link ${activeKey === 'all-history' ? 'active' : ''}">
+      <span class="icon">📊</span><span class="text">All Attempts</span>
+    </a>
+    <a href="#/host/users" class="side-link ${activeKey === 'users' ? 'active' : ''}">
+      <span class="icon">👥</span><span class="text">Manage Users</span>
+    </a>
     <div class="side-group-title">Practice</div>
-    <a href="#/take-key" class="side-link ${activeKey === 'take' ? 'active' : ''}">📝 Take Test</a>
-    <a href="#/my-history" class="side-link ${activeKey === 'history' ? 'active' : ''}">📈 My History</a>
-    <a href="#/settings" class="side-link ${activeKey === 'settings' ? 'active' : ''}">⚙️ Settings</a>
+    <a href="#/take-key" class="side-link ${activeKey === 'take' ? 'active' : ''}">
+      <span class="icon">📝</span><span class="text">Take Test</span>
+    </a>
+    <a href="#/my-history" class="side-link ${activeKey === 'history' ? 'active' : ''}">
+      <span class="icon">📈</span><span class="text">My History</span>
+    </a>
   `;
 
   const userNav = `
     <div class="side-group-title">Student Portal</div>
-    <a href="#/take-key" class="side-link ${activeKey === 'take' ? 'active' : ''}">📝 Take Test</a>
-    <a href="#/my-history" class="side-link ${activeKey === 'history' ? 'active' : ''}">📈 My History</a>
-    <a href="#/settings" class="side-link ${activeKey === 'settings' ? 'active' : ''}">⚙️ Settings</a>
+    <a href="#/take-key" class="side-link ${activeKey === 'take' ? 'active' : ''}">
+      <span class="icon">📝</span><span class="text">Take Test</span>
+    </a>
+    <a href="#/my-history" class="side-link ${activeKey === 'history' ? 'active' : ''}">
+      <span class="icon">📈</span><span class="text">My History</span>
+    </a>
   `;
 
   root.innerHTML = `
     <div class="app-layout-sidebar">
-      <!-- Responsive Left Sidebar -->
       <aside class="app-sidebar">
         <div>
-          <!-- Home Hub Button -->
-          <a href="#/hub" class="side-link" style="font-weight:700; color:var(--primary-accent); margin-bottom:12px; background:var(--bg-muted);">
-            🏠 Home Hub
+          <a href="#/hub" class="side-link" style="color:var(--primary-accent); margin-bottom:12px; background:var(--accent-soft);">
+            <span class="icon">🏠</span><span class="text" style="font-weight:700;">Home Hub</span>
           </a>
           <div class="side-nav-group">
             ${isHost ? hostNav : userNav}
           </div>
         </div>
 
-        <!-- Pinned Logout at bottom of Left Sidebar -->
         <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 16px;">
-          <button class="side-link" style="width:100%; border:none; background:transparent; color:var(--danger); font-weight:600;" onclick="confirmLogout()">
-            🚪 Logout
+          <a href="#/settings" class="side-link ${activeKey === 'settings' ? 'active' : ''}" style="margin-bottom:6px;">
+            <span class="icon">⚙️</span><span class="text">Settings</span>
+          </a>
+          <button class="side-link" style="width:100%; border:none; background:transparent; color:var(--danger);" onclick="confirmLogout()">
+            <span class="icon">🚪</span><span class="text" style="font-weight:600;">Logout</span>
           </button>
         </div>
       </aside>
 
-      <!-- Main Feature Screen -->
       <main class="app-content-area" id="sub-view-root"></main>
     </div>
   `;
@@ -214,38 +233,34 @@ function wrapInAppShell(root, renderCallback, activeKey) {
   renderCallback(subRoot);
 }
 
-// 1. Host Card Hub (Home View)
+// 1. One-Line Host Card Hub
 function renderHostHub(container) {
   container.innerHTML = `
-    <div style="max-width: 980px; margin: 36px auto; padding: 0 16px;">
-      <div style="margin-bottom: 28px;">
-        <h1 style="font-size: 2rem; margin-bottom: 6px; font-weight:700;">Host Control Hub</h1>
-        <p style="color: var(--text-secondary); font-size:1rem;">Manage exams, question papers, candidate attempts, and user authorizations.</p>
+    <div style="max-width: 1240px; margin: 40px auto; padding: 0 24px;">
+      <div style="margin-bottom: 32px;">
+        <h1 style="font-size: 2.2rem; margin-bottom: 6px; font-weight:700;">Host Control Hub</h1>
+        <p style="color: var(--text-secondary); font-size:1.05rem;">Manage exams, question papers, candidate attempts, and user authorizations.</p>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
-        <!-- Upload Test Card -->
+      <div class="hub-grid-host">
         <div class="card hub-card" style="border-top: 5px solid #137333;" onclick="window.location.hash='#/host/upload'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">📤</div>
           <h3 style="margin-bottom: 8px;">Upload Test</h3>
           <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Parse a question paper PDF or compose questions manually.</p>
         </div>
 
-        <!-- My Tests Card -->
         <div class="card hub-card" style="border-top: 5px solid #1a73e8;" onclick="window.location.hash='#/host/tests'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">📚</div>
           <h3 style="margin-bottom: 8px;">My Tests</h3>
           <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, copy test keys, and preview tests.</p>
         </div>
 
-        <!-- All Attempts Card -->
         <div class="card hub-card" style="border-top: 5px solid #f2994a;" onclick="window.location.hash='#/host/all-history'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">📊</div>
           <h3 style="margin-bottom: 8px;">All Attempts</h3>
           <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Track candidate scores, submissions, accuracy, and pass/fail status.</p>
         </div>
 
-        <!-- Manage Users Card -->
         <div class="card hub-card" style="border-top: 5px solid #9b51e0;" onclick="window.location.hash='#/host/users'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">👥</div>
           <h3 style="margin-bottom: 8px;">Manage Users</h3>
@@ -256,31 +271,28 @@ function renderHostHub(container) {
   `;
 }
 
-// 2. Candidate Card Hub (Home View)
+// 2. One-Line Candidate Card Hub
 function renderUserHub(container) {
   container.innerHTML = `
-    <div style="max-width: 860px; margin: 40px auto; padding: 0 16px;">
-      <div style="margin-bottom: 28px;">
-        <h1 style="font-size: 2rem; margin-bottom: 6px; font-weight:700;">Candidate Portal</h1>
-        <p style="color: var(--text-secondary); font-size:1rem;">Launch practice tests using your host's test key or review your performance history.</p>
+    <div style="max-width: 1100px; margin: 40px auto; padding: 0 24px;">
+      <div style="margin-bottom: 32px; text-align:left;">
+        <h1 style="font-size: 2.2rem; margin-bottom: 6px; font-weight:700;">Candidate Portal</h1>
+        <p style="color: var(--text-secondary); font-size:1.05rem;">Launch practice tests using your host's test key or review your performance history.</p>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px;">
-        <!-- Take Test Card -->
+      <div class="hub-grid-user">
         <div class="card hub-card" style="border-top: 5px solid var(--primary-accent);" onclick="window.location.hash='#/take-key'">
           <div style="font-size: 2.8rem; margin-bottom: 12px;">📝</div>
           <h3 style="margin-bottom: 8px;">Take Practice Test</h3>
           <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Enter an exam test key provided by your host to launch your test.</p>
         </div>
 
-        <!-- My History Card -->
         <div class="card hub-card" style="border-top: 5px solid #1a73e8;" onclick="window.location.hash='#/my-history'">
           <div style="font-size: 2.8rem; margin-bottom: 12px;">📈</div>
           <h3 style="margin-bottom: 8px;">My Performance History</h3>
           <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Review past scorecards, accuracy, detailed explanations, and solutions.</p>
         </div>
 
-        <!-- Settings Card -->
         <div class="card hub-card" style="border-top: 5px solid #9b51e0;" onclick="window.location.hash='#/settings'">
           <div style="font-size: 2.8rem; margin-bottom: 12px;">⚙️</div>
           <h3 style="margin-bottom: 8px;">Account Settings</h3>
@@ -291,7 +303,6 @@ function renderUserHub(container) {
   `;
 }
 
-// 3. Public Landing (Clean Header, Options front-and-center)
 function renderPublicLanding(container) {
   container.innerHTML = `
     <div style="max-width: 800px; margin: 60px auto; text-align:center; padding: 0 16px;">
@@ -308,14 +319,11 @@ function renderPublicLanding(container) {
   `;
 }
 
-// Global UI Indicators
 window.showLoading = function (title = 'Processing...', message = 'Please wait...') {
   const overlay = document.getElementById('global-loading-overlay');
-  const titleEl = document.getElementById('global-loading-title');
-  const msgEl = document.getElementById('global-loading-msg');
   if (overlay) {
-    if (titleEl) titleEl.innerText = title;
-    if (msgEl) msgEl.innerText = message;
+    document.getElementById('global-loading-title').innerText = title;
+    document.getElementById('global-loading-msg').innerText = message;
     overlay.style.display = 'flex';
   }
 };
@@ -332,10 +340,7 @@ window.showToast = function (message, type = 'info') {
   toast.className = `toast ${type}`;
   toast.innerText = message;
   container.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    setTimeout(() => toast.remove(), 300);
-  }, 4000);
+  setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
 };
 
 window.showModal = function ({ title, bodyHtml, confirmText = 'Confirm', danger = false, onConfirm = () => {} }) {
@@ -356,8 +361,5 @@ window.showModal = function ({ title, bodyHtml, confirmText = 'Confirm', danger 
   `;
 
   document.getElementById('modal-cancel-btn').onclick = () => { container.innerHTML = ''; };
-  document.getElementById('modal-confirm-btn').onclick = () => {
-    container.innerHTML = '';
-    onConfirm();
-  };
+  document.getElementById('modal-confirm-btn').onclick = () => { container.innerHTML = ''; onConfirm(); };
 };
