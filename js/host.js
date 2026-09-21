@@ -86,7 +86,7 @@ window.Host = {
     window.location.hash = '#/host/review';
   },
 
-  // 2. Review, Edit & Exam Settings View
+  // 2. Review & Settings View
   renderReview(container) {
     const draft = window.AppState.parsedExamDraft;
     if (!draft || !draft.questions) {
@@ -201,7 +201,7 @@ window.Host = {
               </label>
             </div>
 
-            <button type="submit" class="btn-primary" style="width:100%; margin-top:24px; padding:12px; font-size:1.1rem;">Publish Exam & Generate Test Key</button>
+            <button type="submit" id="publish-submit-btn" class="btn-primary" style="width:100%; margin-top:24px; padding:12px; font-size:1.1rem;">Publish Exam & Generate Test Key</button>
           </form>
         </div>
       </div>
@@ -243,7 +243,7 @@ window.Host = {
     Host.renderReview(document.getElementById('app-root'));
   },
 
-  // 3. Save to Supabase, Generate Key, and Show Formatted Share Options
+  // 3. Save to Supabase with Feedback Overlay
   async saveAndPublishExam() {
     const draft = window.AppState.parsedExamDraft;
     const title = document.getElementById('cfg-title').value.trim();
@@ -256,148 +256,143 @@ window.Host = {
     const shuffleQ = document.getElementById('cfg-shuffle-q').checked;
     const shuffleOpt = document.getElementById('cfg-shuffle-opt').checked;
 
-    // Generate readable Unique Test Key (e.g. ABC-4821)
-    const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-    const numbers = '23456789';
-    let code = '';
-    for (let i = 0; i < 3; i++) code += letters.charAt(Math.floor(Math.random() * letters.length));
-    code += '-';
-    for (let i = 0; i < 4; i++) code += numbers.charAt(Math.floor(Math.random() * numbers.length));
+    window.showLoading('Publishing Exam...', 'Saving question sets, calculating sections, and generating key...');
 
-    // Upload PDF if present
-    let pdfUrl = null;
-    if (draft.originalFile) {
-      const filePath = `${code}_${draft.originalFile.name}`;
-      const { data: uploadData, error: upErr } = await window.sb.storage
-        .from('exam-pdfs')
-        .upload(filePath, draft.originalFile);
-      if (!upErr) pdfUrl = filePath;
-    }
+    try {
+      const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+      const numbers = '23456789';
+      let code = '';
+      for (let i = 0; i < 3; i++) code += letters.charAt(Math.floor(Math.random() * letters.length));
+      code += '-';
+      for (let i = 0; i < 4; i++) code += numbers.charAt(Math.floor(Math.random() * numbers.length));
 
-    // Insert Test Record
-    const { data: testRecord, error: testErr } = await window.sb
-      .from('tests')
-      .insert({
-        test_key: code,
-        title,
-        duration_minutes: duration,
-        has_sections: true,
-        shuffle_questions: shuffleQ,
-        shuffle_options: shuffleOpt,
-        passing_score_type: passType,
-        passing_score: passScore,
-        pdf_url: pdfUrl,
-        created_by: window.AppState.user.id
-      })
-      .select()
-      .single();
+      let pdfUrl = null;
+      if (draft.originalFile) {
+        const filePath = `${code}_${draft.originalFile.name}`;
+        const { data: uploadData, error: upErr } = await window.sb.storage
+          .from('exam-pdfs')
+          .upload(filePath, draft.originalFile);
+        if (!upErr) pdfUrl = filePath;
+      }
 
-    if (testErr) {
-      window.showToast('Failed to create test: ' + testErr.message, 'error');
-      return;
-    }
-
-    // Extract Unique Sections
-    const uniqueSecs = Array.from(new Set(draft.questions.map(q => q.section || 'General')));
-    const secInsertPayload = uniqueSecs.map((s, sIdx) => ({
-      test_id: testRecord.id,
-      title: s,
-      order_index: sIdx,
-      marks_correct: marksCorrect,
-      marks_incorrect: marksIncorrect,
-      marks_unattempted: marksUnatt
-    }));
-
-    const { data: insertedSections } = await window.sb
-      .from('sections')
-      .insert(secInsertPayload)
-      .select();
-
-    const secMap = {};
-    if (insertedSections) {
-      insertedSections.forEach(s => { secMap[s.title] = s.id; });
-    }
-
-    // Insert Questions & Options
-    for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
-      const q = draft.questions[qIdx];
-      const { data: qRecord } = await window.sb
-        .from('questions')
+      const { data: testRecord, error: testErr } = await window.sb
+        .from('tests')
         .insert({
-          test_id: testRecord.id,
-          section_id: secMap[q.section || 'General'] || null,
-          order_index: qIdx,
-          question_text: q.question_text,
-          correct_option_index: q.correct_option_index,
-          explanation: q.explanation
+          test_key: code,
+          title,
+          duration_minutes: duration,
+          has_sections: true,
+          shuffle_questions: shuffleQ,
+          shuffle_options: shuffleOpt,
+          passing_score_type: passType,
+          passing_score: passScore,
+          pdf_url: pdfUrl,
+          created_by: window.AppState.user.id
         })
         .select()
         .single();
 
-      if (qRecord && q.options && q.options.length > 0) {
-        const optPayload = q.options.map((optText, oIdx) => ({
-          question_id: qRecord.id,
-          option_index: oIdx,
-          option_text: optText
-        }));
-        await window.sb.from('question_options').insert(optPayload);
+      if (testErr) throw new Error(testErr.message);
+
+      const uniqueSecs = Array.from(new Set(draft.questions.map(q => q.section || 'General')));
+      const secInsertPayload = uniqueSecs.map((s, sIdx) => ({
+        test_id: testRecord.id,
+        title: s,
+        order_index: sIdx,
+        marks_correct: marksCorrect,
+        marks_incorrect: marksIncorrect,
+        marks_unattempted: marksUnatt
+      }));
+
+      const { data: insertedSections } = await window.sb
+        .from('sections')
+        .insert(secInsertPayload)
+        .select();
+
+      const secMap = {};
+      if (insertedSections) {
+        insertedSections.forEach(s => { secMap[s.title] = s.id; });
       }
-    }
 
-    // Clean draft
-    window.AppState.parsedExamDraft = null;
+      for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
+        const q = draft.questions[qIdx];
+        const { data: qRecord } = await window.sb
+          .from('questions')
+          .insert({
+            test_id: testRecord.id,
+            section_id: secMap[q.section || 'General'] || null,
+            order_index: qIdx,
+            question_text: q.question_text,
+            correct_option_index: q.correct_option_index,
+            explanation: q.explanation
+          })
+          .select()
+          .single();
 
-    // Formatted invitation text payload
-    const examUrl = `https://mockorbit-cbt.vercel.app/#/instructions/${code}`;
-    const portalUrl = `https://mockorbit-cbt.vercel.app`;
-    const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
-      `📌 *Exam:* ${title}\n` +
-      `⏱️ *Duration:* ${duration} mins\n` +
-      `🎯 *Marking:* +${marksCorrect} for correct, -${marksIncorrect} for incorrect\n` +
-      `🏆 *Passing:* ${passScore} ${passType === 'PERCENT' ? '%' : 'Marks'}\n\n` +
-      `🔑 *Test Key:* ${code}\n` +
-      `🔗 *Direct Test Link:* ${examUrl}\n\n` +
-      `Login to your student account and enter the key at: ${portalUrl}`;
+        if (qRecord && q.options && q.options.length > 0) {
+          const optPayload = q.options.map((optText, oIdx) => ({
+            question_id: qRecord.id,
+            option_index: oIdx,
+            option_text: optText
+          }));
+          await window.sb.from('question_options').insert(optPayload);
+        }
+      }
 
-    // Show generated Key Screen with full Share details
-    document.getElementById('app-root').innerHTML = `
-      <div class="card" style="max-width:620px; margin:30px auto; text-align:center;">
-        <div style="font-size:2.8rem; margin-bottom:8px;">🎉</div>
-        <h2>Exam Published Successfully!</h2>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Your exam is ready for students. Share the details below:</p>
-        
-        <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
-          ${code}
-        </div>
+      window.AppState.parsedExamDraft = null;
+      window.hideLoading();
 
-        <!-- Formatted Summary Card -->
-        <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
-          <p><strong>Exam Name:</strong> ${title}</p>
-          <p><strong>Duration:</strong> ${duration} Minutes</p>
-          <p><strong>Marking:</strong> +${marksCorrect} / -${marksIncorrect}</p>
-          <p><strong>Test Key:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${code}</span></p>
-          <p style="margin-top:6px; word-break:break-all;"><strong>Direct Link:</strong> <a href="${examUrl}" target="_blank">${examUrl}</a></p>
-        </div>
+      const examUrl = `https://mockorbit-cbt.vercel.app/#/instructions/${code}`;
+      const portalUrl = `https://mockorbit-cbt.vercel.app`;
+      const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
+        `📌 *Exam:* ${title}\n` +
+        `⏱️ *Duration:* ${duration} mins\n` +
+        `🎯 *Marking:* +${marksCorrect} for correct, -${marksIncorrect} for incorrect\n` +
+        `🏆 *Passing:* ${passScore} ${passType === 'PERCENT' ? '%' : 'Marks'}\n\n` +
+        `🔑 *Test Key:* ${code}\n` +
+        `🔗 *Direct Test Link:* ${examUrl}\n\n` +
+        `Login to your student account and enter the key at: ${portalUrl}`;
 
-        <!-- Share Actions -->
-        <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
-          <button class="btn-primary" style="width:100%; padding:11px;" onclick="Host.copyInviteText(\`${encodeURIComponent(shareMessage)}\`)">
-            📋 Copy Complete Student Invitation
-          </button>
+      document.getElementById('app-root').innerHTML = `
+        <div class="card" style="max-width:620px; margin:30px auto; text-align:center;">
+          <div style="font-size:2.8rem; margin-bottom:8px;">🎉</div>
+          <h2>Exam Published Successfully!</h2>
+          <p style="color:var(--text-secondary); margin-bottom:20px;">Your exam is ready for students. Share the details below:</p>
           
-          <div style="display:flex; gap:10px;">
-            <button class="btn-secondary" style="flex:1;" onclick="Host.shareViaWhatsApp(\`${encodeURIComponent(shareMessage)}\`)">
-              💬 Share on WhatsApp
-            </button>
-            <button class="btn-secondary" style="flex:1;" onclick="Host.triggerNativeShare(\`${encodeURIComponent(title)}\`, \`${encodeURIComponent(shareMessage)}\`, \`${encodeURIComponent(examUrl)}\`)">
-              📲 Share / Send
-            </button>
+          <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
+            ${code}
           </div>
-        </div>
 
-        <a href="#/host/tests"><button class="btn-outline" style="width:100%;">View All My Tests</button></a>
-      </div>
-    `;
+          <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
+            <p><strong>Exam Name:</strong> ${title}</p>
+            <p><strong>Duration:</strong> ${duration} Minutes</p>
+            <p><strong>Marking:</strong> +${marksCorrect} / -${marksIncorrect}</p>
+            <p><strong>Test Key:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${code}</span></p>
+            <p style="margin-top:6px; word-break:break-all;"><strong>Direct Link:</strong> <a href="${examUrl}" target="_blank">${examUrl}</a></p>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
+            <button class="btn-primary" style="width:100%; padding:11px;" onclick="Host.copyInviteText(\`${encodeURIComponent(shareMessage)}\`)">
+              📋 Copy Complete Student Invitation
+            </button>
+            
+            <div style="display:flex; gap:10px;">
+              <button class="btn-secondary" style="flex:1;" onclick="Host.shareViaWhatsApp(\`${encodeURIComponent(shareMessage)}\`)">
+                💬 Share on WhatsApp
+              </button>
+              <button class="btn-secondary" style="flex:1;" onclick="Host.triggerNativeShare(\`${encodeURIComponent(title)}\`, \`${encodeURIComponent(shareMessage)}\`, \`${encodeURIComponent(examUrl)}\`)">
+                📲 Share / Send
+              </button>
+            </div>
+          </div>
+
+          <a href="#/host/tests"><button class="btn-outline" style="width:100%;">View All My Tests</button></a>
+        </div>
+      `;
+    } catch (err) {
+      window.hideLoading();
+      window.showToast('Failed to publish exam: ' + err.message, 'error');
+    }
   },
 
   copyInviteText(encodedText) {
@@ -421,17 +416,13 @@ window.Host = {
     const url = decodeURIComponent(urlEnc);
 
     if (navigator.share) {
-      navigator.share({
-        title: title,
-        text: text,
-        url: url
-      }).catch(() => {});
+      navigator.share({ title, text, url }).catch(() => {});
     } else {
       this.copyInviteText(textEnc);
     }
   },
 
-  // 4. My Uploaded Tests List
+  // 4. My Tests List
   async renderMyTests(container) {
     container.innerHTML = `<div class="card"><p>Loading your exams...</p></div>`;
 
@@ -463,7 +454,7 @@ window.Host = {
           <div>
             <h3 style="margin-bottom:4px;">${t.title}</h3>
             <p style="color:var(--text-secondary); font-size:0.9rem;">
-              Key: <strong style="color:var(--primary-accent);">${t.test_key}</strong> | Duration: ${t.duration_minutes} min | Attempts: ${attemptCount}
+              Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Duration: ${t.duration_minutes} min | Attempts: ${attemptCount}
             </p>
           </div>
           <div style="display:flex; gap:8px;">
@@ -504,7 +495,7 @@ window.Host = {
     });
   },
 
-  // 5. User Management (Gated Access & Administrative Password Reset)
+  // 5. User Access Management
   async renderUserManager(container) {
     container.innerHTML = `<div class="card"><p>Loading user list...</p></div>`;
 
@@ -520,7 +511,6 @@ window.Host = {
       <div style="max-width:900px; margin:0 auto;">
         <h2>User Access Management</h2>
         
-        <!-- Add Authorized Email Form -->
         <div class="card" style="margin:20px 0;">
           <h3>Authorize New Student Email</h3>
           <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:14px;">Only authorized emails can register on this portal.</p>
@@ -534,7 +524,6 @@ window.Host = {
           </form>
         </div>
 
-        <!-- Registered Users Table -->
         <div class="card">
           <h3 style="margin-bottom:14px;">Registered Users (${profiles.length})</h3>
           <div style="overflow-x:auto;">
@@ -585,7 +574,6 @@ window.Host = {
       if (newPwd !== null) window.showToast('Password must be at least 6 characters.', 'error');
       return;
     }
-
     Host.executePasswordReset(userId, newPwd);
   },
 
@@ -605,7 +593,7 @@ window.Host = {
   deleteUser(userId, email) {
     window.showModal({
       title: 'Remove User?',
-      bodyHtml: `Are you sure you want to remove <strong>${email}</strong>? Their profile and authorized email will be removed.`,
+      bodyHtml: `Are you sure you want to remove <strong>${email}</strong>?`,
       confirmText: 'Remove User',
       danger: true,
       onConfirm: async () => {
