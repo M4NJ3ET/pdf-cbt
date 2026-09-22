@@ -1,181 +1,115 @@
 window.PdfParser = {
-  async parseFile(file, progressCallback) {
+  async parseFile(file, progressCallback = () => {}) {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     const numPages = pdf.numPages;
 
-    let fullLines = [];
-
-    // 1. Extract text items page-by-page and group by vertical lines (Y position)
+    let fullText = '';
     for (let i = 1; i <= numPages; i++) {
-      if (progressCallback) progressCallback(Math.round((i / numPages) * 70));
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      
-      // Group items with similar transform[5] (Y-coordinate)
-      let lineMap = {};
-      textContent.items.forEach(item => {
-        const y = Math.round(item.transform[5] / 3) * 3; // 3pt clustering
-        if (!lineMap[y]) lineMap[y] = [];
-        lineMap[y].push(item);
-      });
-
-      // Sort Y descending (top of page to bottom)
-      const sortedYs = Object.keys(lineMap).sort((a, b) => Number(b) - Number(a));
-      sortedYs.forEach(y => {
-        // Sort X ascending (left to right)
-        const lineItems = lineMap[y].sort((a, b) => a.transform[4] - b.transform[4]);
-        const lineText = lineItems.map(item => item.str).join(' ').trim();
-        if (lineText) fullLines.push(lineText);
-      });
+      const pageText = textContent.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n';
+      progressCallback(Math.round((i / numPages) * 70));
     }
 
-    if (fullLines.length === 0) {
-      throw new Error("EMPTY_OR_SCANNED_PDF");
+    if (!fullText.trim()) {
+      throw new Error('EMPTY_OR_SCANNED_PDF');
     }
 
-    if (progressCallback) progressCallback(85);
-
-    // 2. Parse questions, sections, options, answers, explanations
-    const parsedData = this.interpretLines(fullLines);
-    if (progressCallback) progressCallback(100);
-    return parsedData;
+    return this.structureQuestions(fullText, file.name.replace(/\.[^/.]+$/, ''));
   },
 
-  interpretLines(lines) {
-    let questions = [];
-    let sections = [];
+  structureQuestions(text, defaultTitle) {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const questions = [];
     let currentSection = 'General';
-    let currentQ = null;
-    let inAnswerKeySection = false;
-    let answerKeyMap = {}; // Question Number -> Option Index
 
-    // Regex matchers
-    const qStartRegex = /^(?:Q(?:uestion)?\.?\s*(\d+)[\.\):\-]|(\d+)[\.\)]\s+)/i;
-    const optRegex = /^(?:\(([A-Da-d1-4])\)|([A-Da-d1-4])[\.\)])\s*(.*)/;
-    const ansInlineRegex = /(?:Ans(?:wer)?|Correct\s*Option)[\s:\.\-]*\(?([A-Da-d1-4])\)?/i;
-    const expRegex = /^(?:Exp(?:lanation)?|Solution|Reason)[\s:\.\-]*(.*)/i;
-    const sectionHeaderRegex = /^(?:Section|Part)\s*[-:]?\s*([A-Za-z0-9\s]+)/i;
+    // Regex matchers for Indian CBT question papers
+    const sectionRegex = /(?:SECTION|PART)\s*([0-9A-ZIVX]+)?\s*[:\-–]?\s*([A-Za-z0-9\s&()–\-]+)/i;
+    const questionStartRegex = /^(?:Question|Q\.?)\s*(\d+)[\s:\-–.]+(.*)/i;
+    const optionRegex = /^\(([A-D1-4])\)\s*(.*)/i;
+    const ansRegex = /^(?:Correct\s*Answer|Ans(?:wer)?)\s*[:\-–]?\s*(?:\(?([A-D1-4])\)?)/i;
+    const explRegex = /^(?:Explanation|Solution|Exp)\s*[:\-–]?\s*(.*)/i;
 
-    for (let idx = 0; idx < lines.length; idx++) {
-      const line = lines[idx];
+    let currQ = null;
 
-      // Detect end-of-document Answer Key tables or blocks
-      if (/^(?:Answer\s*Key|Answers\s*:?)/i.test(line)) {
-        inAnswerKeySection = true;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // 1. Detect Section Header
+      const secMatch = line.match(sectionRegex);
+      if (secMatch && !line.match(questionStartRegex) && line.length < 80) {
+        currentSection = line.replace(/^(?:SECTION|PART)\s*[0-9A-ZIVX]*\s*[:\-–]?\s*/i, '').trim() || line;
         continue;
       }
 
-      if (inAnswerKeySection) {
-        // Match occurrences like "1. A", "2-(B)", "3:C", "4. 2"
-        const pairRegex = /(\d+)[\.\s:\-]+(?:\(?([A-Da-d1-4])\)?)/g;
-        let match;
-        while ((match = pairRegex.exec(line)) !== null) {
-          const qNum = parseInt(match[1]);
-          const optVal = this.normalizeOptionIndex(match[2]);
-          answerKeyMap[qNum] = optVal;
-        }
-        continue;
-      }
-
-      // Check Section headers
-      const secMatch = line.match(sectionHeaderRegex);
-      if (secMatch && !currentQ) {
-        currentSection = secMatch[1].trim();
-        if (!sections.includes(currentSection)) sections.push(currentSection);
-        continue;
-      }
-
-      // Check New Question Start
-      const qMatch = line.match(qStartRegex);
+      // 2. Detect Question Start
+      const qMatch = line.match(questionStartRegex);
       if (qMatch) {
-        if (currentQ) questions.push(currentQ);
-        const qNum = parseInt(qMatch[1] || qMatch[2]);
-        const qText = line.replace(qStartRegex, '').trim();
-
-        currentQ = {
-          num: qNum,
+        if (currQ) questions.push(currQ);
+        currQ = {
+          num: questions.length + 1,
           section: currentSection,
-          question_text: qText,
+          question_text: qMatch[2] ? qMatch[2].trim() : '',
           options: [],
-          correct_option_index: -1,
+          correct_option_index: 0,
           explanation: '',
           warnings: []
         };
         continue;
       }
 
-      if (currentQ) {
-        // Check inline Answer
-        const ansMatch = line.match(ansInlineRegex);
-        if (ansMatch) {
-          currentQ.correct_option_index = this.normalizeOptionIndex(ansMatch[1]);
-          continue;
-        }
+      if (!currQ) continue;
 
-        // Check Explanation
-        const expMatch = line.match(expRegex);
-        if (expMatch) {
-          currentQ.explanation = expMatch[1] || '';
-          continue;
-        }
+      // 3. Detect Options (A), (B), (C), (D)
+      const optMatch = line.match(optionRegex);
+      if (optMatch) {
+        currQ.options.push(optMatch[2].trim());
+        continue;
+      }
 
-        // Check Option
-        const optMatch = line.match(optRegex);
-        if (optMatch) {
-          const optText = (optMatch[3] || '').trim();
-          currentQ.options.push(optText);
-          continue;
+      // 4. Detect Answer
+      const ansMatch = line.match(ansRegex);
+      if (ansMatch) {
+        const letter = ansMatch[1].toUpperCase();
+        const mapping = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, '1': 0, '2': 1, '3': 2, '4': 3 };
+        if (mapping[letter] !== undefined) {
+          currQ.correct_option_index = mapping[letter];
         }
+        continue;
+      }
 
-        // Append remaining text either to explanation, last option, or question text
-        if (currentQ.explanation) {
-          currentQ.explanation += ' ' + line;
-        } else if (currentQ.options.length > 0) {
-          currentQ.options[currentQ.options.length - 1] += ' ' + line;
-        } else {
-          currentQ.question_text += ' ' + line;
-        }
+      // 5. Detect Explanation
+      const explMatch = line.match(explRegex);
+      if (explMatch) {
+        currQ.explanation = explMatch[1].trim();
+        continue;
+      }
+
+      // 6. Append continuation text
+      if (currQ.options.length === 0) {
+        currQ.question_text += ' ' + line;
+      } else if (currQ.explanation) {
+        currQ.explanation += ' ' + line;
+      } else if (currQ.options.length > 0) {
+        currQ.options[currQ.options.length - 1] += ' ' + line;
       }
     }
 
-    if (currentQ) questions.push(currentQ);
+    if (currQ) questions.push(currQ);
 
-    // Reconcile with Answer Key map if present
-    questions.forEach((q, idx) => {
-      const detectedNum = q.num || (idx + 1);
-      if (q.correct_option_index === -1 && answerKeyMap[detectedNum] !== undefined) {
-        q.correct_option_index = answerKeyMap[detectedNum];
-      }
-
-      // Mark warnings for quality inspection
-      if (!q.question_text || q.question_text.trim().length === 0) {
-        q.warnings.push('Question text appears empty.');
-      }
-      if (q.options.length < 2) {
-        q.warnings.push(`Only ${q.options.length} option(s) detected.`);
-      }
-      if (q.correct_option_index < 0 || q.correct_option_index >= q.options.length) {
-        q.warnings.push('Correct answer could not be verified automatically.');
-        q.correct_option_index = 0; // Default fallback to A
+    // Fallback: Default 4 options if some were parsed without choices
+    questions.forEach(q => {
+      q.question_text = q.question_text.trim();
+      while (q.options.length < 4) {
+        q.options.push(`Option ${String.fromCharCode(65 + q.options.length)}`);
       }
     });
 
-    if (sections.length === 0) sections = ['General'];
-
     return {
-      title: 'Uploaded Practice Exam',
-      sections,
+      title: defaultTitle || 'Practice Mock Test',
       questions
     };
-  },
-
-  normalizeOptionIndex(label) {
-    const cleaned = label.trim().toUpperCase();
-    if (cleaned === 'A' || cleaned === '1') return 0;
-    if (cleaned === 'B' || cleaned === '2') return 1;
-    if (cleaned === 'C' || cleaned === '3') return 2;
-    if (cleaned === 'D' || cleaned === '4') return 3;
-    return 0;
   }
 };
