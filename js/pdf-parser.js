@@ -10,27 +10,30 @@ window.PdfParser = {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
 
-      // Filter out empty items
       const items = textContent.items.filter(item => item.str && item.str.trim().length > 0);
 
-      // Sort items: Primary by Top-to-Bottom (Y desc), Secondary by Left-to-Right (X asc)
+      // Sort items: Top-to-Bottom, then Left-to-Right
       items.sort((a, b) => {
         const yA = a.transform[5];
         const yB = b.transform[5];
-        if (Math.abs(yA - yB) < 5) { // Same visual line
+        if (Math.abs(yA - yB) < 5) {
           return a.transform[4] - b.transform[4];
         }
-        return yB - yA; // Higher Y coordinate comes first
+        return yB - yA;
       });
 
-      // Cluster sorted items into visual lines
       let currentLineY = null;
       let lineTokens = [];
 
       for (const item of items) {
         const y = item.transform[5];
-        // Ignore print header/footer lines (e.g., URL file path, Page 1 of 26, timestamp)
-        if (item.str.includes('file:///') || item.str.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/) || item.str.match(/Page\s+\d+\s+of\s+\d+/i)) {
+        // Ignore browser print footers, file paths, URLs, page numbers
+        if (
+          item.str.includes('file:///') ||
+          item.str.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/) ||
+          item.str.match(/^\d+\/\d+$/) ||
+          item.str.match(/Page\s+\d+\s+of\s+\d+/i)
+        ) {
           continue;
         }
 
@@ -63,8 +66,8 @@ window.PdfParser = {
     const questions = [];
     let currentSection = 'General';
 
-    // Universal Flexible Patterns
-    const secRegex = /^(?:SECTION|PART)\s*([0-9A-ZIVX]+)?\s*[:\-–]?\s*(.*)/i;
+    // Strict regex with word boundaries (\b) so "participle" or "department" never triggers
+    const secRegex = /^\s*\b(?:SECTION|PART)\b\s*([0-9A-ZIVX]+)?\s*[:\-–]?\s*([A-Za-z0-9\s&()–\-]+)/i;
     // Matches: "Question 1:", "Q.1", "1. ", "1)", "Q1 - "
     const qStartRegex = /^(?:(?:Question|Q\.?)\s*(\d+)[\s:\-–.]+|(\d+)[\.\)]\s+)(.*)/i;
     // Matches: "(A)", "(a)", "A.", "A)", "(1)"
@@ -79,11 +82,15 @@ window.PdfParser = {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // 1. Check Section Header
+      // 1. Check Section Header (Strict matching + must have alphabetic title)
       const secMatch = line.match(secRegex);
       if (secMatch && !line.match(qStartRegex) && line.length < 80) {
-        currentSection = secMatch[2]?.trim() || line;
-        continue;
+        const candidateTitle = secMatch[2]?.trim();
+        // Discard punctuation-only matches or tiny false fragments
+        if (candidateTitle && /[A-Za-z]{3,}/.test(candidateTitle)) {
+          currentSection = candidateTitle;
+          continue;
+        }
       }
 
       // 2. Check Question Start
@@ -133,7 +140,7 @@ window.PdfParser = {
         continue;
       }
 
-      // 6. Continuation content
+      // 6. Multiline continuation
       if (currQ.options.length === 0) {
         currQ.question_text += ' ' + line;
       } else if (currQ.explanation) {
