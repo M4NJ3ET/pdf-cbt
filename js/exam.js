@@ -1,14 +1,14 @@
 window.Exam = {
   currentTest: null,
   sections: [],
-  questionsBySection: [], // Array of question arrays, one per section
+  questionsBySection: [],
   allQuestionsFlat: [],
   currentSectionIndex: 0,
-  currentQuestionIndex: 0, // Index within current active section
+  currentQuestionIndex: 0,
   answers: {},
   reviewMarked: {},
   visited: {},
-  sectionTimeRemaining: {}, // sectionId -> seconds
+  sectionTimeRemaining: {},
   timerInterval: null,
   attemptId: null,
   isPaused: false,
@@ -54,7 +54,6 @@ window.Exam = {
       return;
     }
 
-    const qCount = test.questions && test.questions[0] ? test.questions[0].count : 0;
     const sortedSections = (test.sections || []).sort((a, b) => a.order_index - b.order_index);
 
     const storageKey = `cbt_attempt_${test.id}_${window.AppState.user.id}`;
@@ -63,7 +62,6 @@ window.Exam = {
 
     if (savedState) {
       try {
-        const parsed = JSON.parse(savedState);
         resumeNotice = `
           <div style="background:#e8f0fe; border:1px solid #1a73e8; border-radius:var(--radius-sm); padding:12px; margin-bottom:20px; text-align:left;">
             <strong>📌 Resume Saved Attempt Available</strong>
@@ -81,7 +79,7 @@ window.Exam = {
         ${resumeNotice}
 
         <div style="background:var(--bg-muted); padding:16px; border-radius:var(--radius-md); margin-bottom:20px;">
-          <h4 style="margin-bottom:8px;">Section Breakdown & Schedule</h4>
+          <h4 style="margin-bottom:8px;">Section Breakdown & Rules</h4>
           <table style="width:100%; border-collapse:collapse; font-size:0.9rem; margin-bottom:12px;">
             <thead>
               <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary); text-align:left;">
@@ -149,21 +147,27 @@ window.Exam = {
       this.sections = [{ id: 'default', title: 'General', duration_minutes: test.duration_minutes, allow_switching: true, auto_advance: true }];
     }
 
-    // Group questions by section
+    // Unpack shared context headers
+    questions.forEach(q => {
+      if (q.question_text && q.question_text.startsWith('[SHARED_GROUP:')) {
+        const closeIdx = q.question_text.indexOf(']\n');
+        if (closeIdx !== -1) {
+          const metaStr = q.question_text.substring(14, closeIdx);
+          const parts = metaStr.split('|');
+          q.group_id = parts[0];
+          q.shared_context = parts.slice(1).join('|');
+          q.question_text = q.question_text.substring(closeIdx + 2);
+        }
+      }
+    });
+
+    // Group by section & shuffle while preserving linked question clusters
     this.questionsBySection = this.sections.map(sec => {
       let secQuestions = questions.filter(q => q.section_id === sec.id);
       if (secQuestions.length === 0 && this.sections.length === 1) secQuestions = [...questions];
 
-      // INTRA-SECTION SHUFFLE: Shuffles questions strictly within this section only
       if (test.shuffle_questions) {
-        secQuestions = this.shuffleArray([...secQuestions]);
-      }
-
-      // Shuffle options within each question if enabled
-      if (test.shuffle_options) {
-        secQuestions.forEach(q => {
-          if (q.question_options) q.question_options = this.shuffleArray([...q.question_options]);
-        });
+        secQuestions = this.shufflePreservingGroups(secQuestions);
       }
 
       return secQuestions;
@@ -178,12 +182,10 @@ window.Exam = {
     this.sectionTimeRemaining = {};
     this.isPaused = false;
 
-    // Initialize timers for each section
     this.sections.forEach(sec => {
       this.sectionTimeRemaining[sec.id] = (sec.duration_minutes || test.duration_minutes) * 60;
     });
 
-    // Restore state from localStorage if active attempt exists
     const storageKey = `cbt_attempt_${testId}_${window.AppState.user.id}`;
     const savedState = localStorage.getItem(storageKey);
 
@@ -210,12 +212,39 @@ window.Exam = {
     this.startSectionTimer();
   },
 
-  shuffleArray(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
+  // Shuffles standalone questions and linked question blocks together, preserving internal group order
+  shufflePreservingGroups(questions) {
+    const blocks = [];
+    let currentGroup = null;
+    let currentGroupItems = [];
+
+    questions.forEach(q => {
+      if (q.group_id) {
+        if (currentGroup === q.group_id) {
+          currentGroupItems.push(q);
+        } else {
+          if (currentGroupItems.length > 0) blocks.push(currentGroupItems);
+          currentGroup = q.group_id;
+          currentGroupItems = [q];
+        }
+      } else {
+        if (currentGroupItems.length > 0) {
+          blocks.push(currentGroupItems);
+          currentGroup = null;
+          currentGroupItems = [];
+        }
+        blocks.push([q]);
+      }
+    });
+    if (currentGroupItems.length > 0) blocks.push(currentGroupItems);
+
+    // Shuffle blocks
+    for (let i = blocks.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
+      [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
     }
-    return arr;
+
+    return blocks.flat();
   },
 
   async initNewAttempt(test) {
@@ -286,7 +315,6 @@ window.Exam = {
           <div class="exam-header">
             <div>
               <strong style="font-size:1.1rem;">${this.currentTest.title}</strong>
-              <!-- Section Tabs Bar -->
               <div id="section-nav-tabs" style="margin-top:8px; display:flex; gap:8px;"></div>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
@@ -368,10 +396,19 @@ window.Exam = {
     const target = document.getElementById('question-render-target');
     const selectedOpt = this.answers[q.id];
 
+    // Check for shared passage or instructions
+    const sharedBanner = q.shared_context ? `
+      <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:var(--radius-sm); padding:14px 16px; margin-bottom:16px; line-height:1.6; font-size:0.95rem; color:#0369a1;">
+        <strong style="display:block; margin-bottom:4px; font-size:0.88rem; text-transform:uppercase; letter-spacing:0.5px;">📌 Linked Instruction / Passage</strong>
+        ${q.shared_context}
+      </div>
+    ` : '';
+
     target.innerHTML = `
       <div style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:8px;">
         ${this.sections[this.currentSectionIndex].title} — Question ${this.currentQuestionIndex + 1} of ${activeQuestions.length}
       </div>
+      ${sharedBanner}
       <div class="exam-question-text">${q.question_text}</div>
       <div class="options-list">
         ${q.question_options.map(opt => `
@@ -637,7 +674,6 @@ window.Exam = {
     let unattemptedCount = 0;
     const answerInserts = [];
 
-    // Map section IDs for accurate marking values
     const secObjMap = {};
     this.sections.forEach(s => { secObjMap[s.id] = s; });
 
