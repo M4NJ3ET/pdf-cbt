@@ -122,7 +122,7 @@ async function handleRoute() {
 
     if (hash.startsWith('#/host/edit/')) {
       const editId = hash.replace('#/host/edit/', '').trim();
-      wrapInAppShell(root, () => Host.loadTestForEdit(editId), 'tests');
+      wrapInAppShell(root, (el) => Host.loadTestForEdit(editId), 'tests');
       return;
     }
 
@@ -235,7 +235,20 @@ function wrapInAppShell(root, renderCallback, activeKey) {
   `;
 
   const subRoot = document.getElementById('sub-view-root');
-  renderCallback(subRoot);
+  if (subRoot && typeof renderCallback === 'function') {
+    try {
+      renderCallback(subRoot);
+    } catch (err) {
+      console.error('Render error in view:', err);
+      subRoot.innerHTML = `
+        <div class="card" style="max-width:500px; margin:40px auto; text-align:center;">
+          <h3 style="color:var(--danger); margin-bottom:8px;">Rendering Error</h3>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:16px;">${err.message}</p>
+          <a href="#/hub"><button class="btn-primary">Return to Hub</button></a>
+        </div>
+      `;
+    }
+  }
 }
 
 function renderHostHub(container) {
