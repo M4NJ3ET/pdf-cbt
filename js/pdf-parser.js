@@ -8,7 +8,17 @@ window.PdfParser = {
     for (let i = 1; i <= numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      const pageText = textContent.items.map(item => item.str).join(' ');
+      
+      // Sort items top-to-bottom, left-to-right to properly handle multi-column layouts
+      const items = textContent.items.sort((a, b) => {
+        const yDiff = Math.abs(a.transform[5] - b.transform[5]);
+        if (yDiff < 4) { // Same line
+          return a.transform[4] - b.transform[4];
+        }
+        return b.transform[5] - a.transform[5]; // Top to bottom
+      });
+
+      const pageText = items.map(item => item.str).join(' ');
       fullText += pageText + '\n';
       progressCallback(Math.round((i / numPages) * 70));
     }
@@ -21,73 +31,105 @@ window.PdfParser = {
   },
 
   structureQuestions(text, defaultTitle) {
-    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    // Separate Answer Key section if present at the end
+    let contentText = text;
+    let answerKeyText = '';
+
+    const answerKeySplit = text.split(/(?:Answer\s*Key|Answers\s*&|Quick\s*Explanations)/i);
+    if (answerKeySplit.length > 1) {
+      contentText = answerKeySplit[0];
+      answerKeyText = answerKeySplit.slice(1).join(' ');
+    }
+
+    // Comprehensive answer map extracted from end-of-file table (e.g., Q# 1 Ans A)
+    const endAnswers = {};
+    const endExplanation = {};
+    if (answerKeyText) {
+      // Matches: 1 A ... or 1 | A | ...
+      const tableRowRegex = /(\d+)\s*\|?\s*([A-D1-4])\s*\|?\s*([^0-9\n|]{2,120})?/gi;
+      let m;
+      while ((m = tableRowRegex.exec(answerKeyText)) !== null) {
+        const qNum = parseInt(m[1]);
+        const letter = m[2].toUpperCase();
+        const mapping = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, '1': 0, '2': 1, '3': 2, '4': 3 };
+        if (mapping[letter] !== undefined) {
+          endAnswers[qNum] = mapping[letter];
+          if (m[3]) endExplanation[qNum] = m[3].trim();
+        }
+      }
+    }
+
+    // Split text into tokens based on question beginnings
+    // Matches: "1. ", "Question 1:", "Q.1", "1) "
+    const qSplitRegex = /(?:^|\n|\s{2,})(?:(?:Question|Q\.?)\s*(\d+)[\s:\-–.]+|(\d+)[\.\)]\s+)(?=[A-Z0-9"'])/gi;
+
     const questions = [];
     let currentSection = 'General';
 
-    // Regex matchers for Indian CBT question papers
-    const sectionRegex = /(?:SECTION|PART)\s*([0-9A-ZIVX]+)?\s*[:\-–]?\s*([A-Za-z0-9\s&()–\-]+)/i;
-    const questionStartRegex = /^(?:Question|Q\.?)\s*(\d+)[\s:\-–.]+(.*)/i;
-    const optionRegex = /^\(([A-D1-4])\)\s*(.*)/i;
-    const ansRegex = /^(?:Correct\s*Answer|Ans(?:wer)?)\s*[:\-–]?\s*(?:\(?([A-D1-4])\)?)/i;
-    const explRegex = /^(?:Explanation|Solution|Exp)\s*[:\-–]?\s*(.*)/i;
-
+    const lines = contentText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     let currQ = null;
+
+    // Pattern matchers
+    const sectionHeaderRegex = /^(?:SECTION|PART)\s*([0-9A-ZIVX]+)?\s*[:\-–]?\s*(.*)/i;
+    const itemQuestionRegex = /^(?:(?:Question|Q\.?)\s*(\d+)[\s:\-–.]+|(\d+)[\.\)]\s+)(.*)/i;
+    const optionRegex = /^\(([A-D1-4])\)\s*(.*)/i;
+    const inlineAnsRegex = /^(?:Correct\s*Answer|Ans(?:wer)?)\s*[:\-–]?\s*(?:\(?([A-D1-4])\)?)/i;
+    const inlineExplRegex = /^(?:Explanation|Solution)\s*[:\-–]?\s*(.*)/i;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // 1. Detect Section Header
-      const secMatch = line.match(sectionRegex);
-      if (secMatch && !line.match(questionStartRegex) && line.length < 80) {
-        currentSection = line.replace(/^(?:SECTION|PART)\s*[0-9A-ZIVX]*\s*[:\-–]?\s*/i, '').trim() || line;
+      // Detect Section Header
+      const secMatch = line.match(sectionHeaderRegex);
+      if (secMatch && !line.match(itemQuestionRegex) && line.length < 80) {
+        currentSection = secMatch[2]?.trim() || line;
         continue;
       }
 
-      // 2. Detect Question Start
-      const qMatch = line.match(questionStartRegex);
+      // Detect Question Start
+      const qMatch = line.match(itemQuestionRegex);
       if (qMatch) {
         if (currQ) questions.push(currQ);
+        const qNum = parseInt(qMatch[1] || qMatch[2]);
         currQ = {
-          num: questions.length + 1,
+          num: qNum || (questions.length + 1),
           section: currentSection,
-          question_text: qMatch[2] ? qMatch[2].trim() : '',
+          question_text: qMatch[3] ? qMatch[3].trim() : '',
           options: [],
-          correct_option_index: 0,
-          explanation: '',
-          warnings: []
+          correct_option_index: endAnswers[qNum] !== undefined ? endAnswers[qNum] : 0,
+          explanation: endExplanation[qNum] || ''
         };
         continue;
       }
 
       if (!currQ) continue;
 
-      // 3. Detect Options (A), (B), (C), (D)
+      // Detect Option (A), (B), (C), (D)
       const optMatch = line.match(optionRegex);
       if (optMatch) {
         currQ.options.push(optMatch[2].trim());
         continue;
       }
 
-      // 4. Detect Answer
-      const ansMatch = line.match(ansRegex);
-      if (ansMatch) {
-        const letter = ansMatch[1].toUpperCase();
+      // Detect Inline Answer
+      const inlineAns = line.match(inlineAnsRegex);
+      if (inlineAns) {
         const mapping = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, '1': 0, '2': 1, '3': 2, '4': 3 };
-        if (mapping[letter] !== undefined) {
-          currQ.correct_option_index = mapping[letter];
+        const ansChar = inlineAns[1].toUpperCase();
+        if (mapping[ansChar] !== undefined) {
+          currQ.correct_option_index = mapping[ansChar];
         }
         continue;
       }
 
-      // 5. Detect Explanation
-      const explMatch = line.match(explRegex);
-      if (explMatch) {
-        currQ.explanation = explMatch[1].trim();
+      // Detect Inline Explanation
+      const inlineExpl = line.match(inlineExplRegex);
+      if (inlineExpl) {
+        currQ.explanation = inlineExpl[1].trim();
         continue;
       }
 
-      // 6. Append continuation text
+      // Multiline append
       if (currQ.options.length === 0) {
         currQ.question_text += ' ' + line;
       } else if (currQ.explanation) {
@@ -99,9 +141,10 @@ window.PdfParser = {
 
     if (currQ) questions.push(currQ);
 
-    // Fallback: Default 4 options if some were parsed without choices
-    questions.forEach(q => {
-      q.question_text = q.question_text.trim();
+    // Normalize questions & ensure 4 options exist
+    questions.forEach((q, idx) => {
+      q.num = idx + 1;
+      q.question_text = q.question_text.replace(/\s+/g, ' ').trim();
       while (q.options.length < 4) {
         q.options.push(`Option ${String.fromCharCode(65 + q.options.length)}`);
       }
