@@ -8,11 +8,10 @@ window.Host = {
           Upload a question paper PDF or paste AI-generated JSON directly.
         </p>
 
-        <!-- Dropzone for PDF -->
         <div id="drop-zone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: pointer; background: var(--bg-muted); margin-bottom: 20px;">
           <div style="font-size: 2.2rem; margin-bottom: 8px;">📄</div>
           <p style="font-weight: 600; margin-bottom: 4px;">Click to browse or drop PDF here</p>
-          <p style="font-size: 0.85rem; color: var(--text-secondary);">Max size 25MB</p>
+          <p style="font-size: 0.85rem; color: var(--text-secondary);">Supports multi-section question papers</p>
           <input type="file" id="pdf-input" accept="application/pdf" style="display: none;" />
         </div>
 
@@ -25,17 +24,15 @@ window.Host = {
 
         <div id="scanned-warning" style="display:none; margin-bottom:20px; padding:16px; background: var(--danger-soft); border-radius: var(--radius-sm); border:1px solid var(--danger);">
           <p style="font-weight:600; color:var(--danger);">Scanned or Image-only PDF Detected</p>
-          <p style="font-size:0.9rem; margin-top:4px;">This PDF contains no extractable text layer. You can enter questions manually or paste AI JSON below.</p>
+          <p style="font-size:0.9rem; margin-top:4px;">No text layer found. Enter questions manually or paste AI JSON below.</p>
           <button class="btn-primary" style="margin-top:10px;" onclick="Host.startManualEntry()">Enter Questions Manually</button>
         </div>
 
-        <!-- Divider -->
         <div style="text-align:center; margin-bottom:20px; position:relative;">
           <span style="background:#fff; padding:0 12px; color:var(--text-secondary); font-size:0.85rem; font-weight:600;">OR IMPORT AI JSON</span>
           <hr style="position:relative; top:-10px; z-index:-1; border:none; border-top:1px solid var(--border-color);" />
         </div>
 
-        <!-- AI JSON Quick Paste Box -->
         <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px;">
           <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:6px;">Paste AI-Generated JSON</label>
           <textarea id="json-paste-input" rows="5" placeholder='{"title": "Exam Title", "questions": [...]}' style="font-family:monospace; font-size:0.85rem; width:100%;"></textarea>
@@ -63,12 +60,12 @@ window.Host = {
       try {
         const parsed = await PdfParser.parseFile(file, (percent) => {
           progressBar.style.width = percent + '%';
-          statusLabel.innerText = `Processing PDF... ${percent}%`;
+          statusLabel.innerText = `Parsing sections & questions... ${percent}%`;
         });
 
         parsed.originalFile = file;
         window.AppState.parsedExamDraft = parsed;
-        window.showToast('PDF parsed successfully! Please review questions.', 'success');
+        window.showToast(`Extracted ${parsed.questions.length} questions across sections!`, 'success');
         window.location.hash = '#/host/review';
       } catch (err) {
         uploadStatus.style.display = 'none';
@@ -104,23 +101,21 @@ window.Host = {
   startManualEntry() {
     window.AppState.parsedExamDraft = {
       title: 'Manual Practice Test',
-      sections: ['General'],
       questions: [
         {
           num: 1,
-          section: 'General',
+          section: 'Section A',
           question_text: 'Enter your question text here',
           options: ['Option A', 'Option B', 'Option C', 'Option D'],
           correct_option_index: 0,
-          explanation: '',
-          warnings: []
+          explanation: ''
         }
       ]
     };
     window.location.hash = '#/host/review';
   },
 
-  // 2. Review & Settings View
+  // 2. Review & Advanced Sectional Settings View
   renderReview(container) {
     const draft = window.AppState.parsedExamDraft;
     if (!draft || !draft.questions) {
@@ -128,16 +123,19 @@ window.Host = {
       return;
     }
 
+    // Detect unique sections in order of appearance
+    const uniqueSecs = [];
+    draft.questions.forEach(q => {
+      const secName = (q.section || 'General').trim();
+      if (!uniqueSecs.includes(secName)) uniqueSecs.push(secName);
+    });
+
     let qHtml = draft.questions.map((q, qIndex) => {
-      const hasWarning = q.warnings && q.warnings.length > 0;
       return `
-        <div class="card" style="margin-bottom:16px; ${hasWarning ? 'border:1.5px solid var(--warning);' : ''}" id="q-card-${qIndex}">
+        <div class="card" style="margin-bottom:16px;" id="q-card-${qIndex}">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <span style="font-weight:700;">Question #${qIndex + 1}</span>
-            <div style="display:flex; gap:8px; align-items:center;">
-              ${hasWarning ? `<span style="color:var(--warning); font-size:0.85rem;" title="${q.warnings.join(' ')}">⚠️ Review Needed</span>` : ''}
-              <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteQuestion(${qIndex})">Delete</button>
-            </div>
+            <span style="font-weight:700;">Question #${qIndex + 1} <span style="font-size:0.8rem; background:var(--accent-soft); color:var(--primary-accent); padding:2px 6px; border-radius:4px; margin-left:8px;">${q.section || 'General'}</span></span>
+            <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteQuestion(${qIndex})">Delete</button>
           </div>
 
           <div class="form-group">
@@ -146,17 +144,17 @@ window.Host = {
           </div>
 
           <div class="form-group">
-            <label>Section</label>
+            <label>Section Name</label>
             <input type="text" value="${q.section || 'General'}" onchange="Host.updateQSection(${qIndex}, this.value)" />
           </div>
 
-          <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options & Correct Answer</label>
+          <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Select Correct Answer)</label>
           <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
             ${q.options.map((opt, oIndex) => `
               <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex}, ${oIndex})">
+                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex}, ${oIndex}, this.value)" />
+                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex}, ${oIndex})">✕</button>
               </div>
             `).join('')}
           </div>
@@ -164,46 +162,95 @@ window.Host = {
 
           <div class="form-group">
             <label>Explanation / Solution</label>
-            <textarea rows="2" placeholder="Optional explanation..." onchange="Host.updateExplanation(${qIndex}, this.value)">${q.explanation || ''}</textarea>
+            <textarea rows="2" placeholder="Explanation..." onchange="Host.updateExplanation(${qIndex}, this.value)">${q.explanation || ''}</textarea>
           </div>
         </div>
       `;
     }).join('');
 
     container.innerHTML = `
-      <div style="max-width: 900px; margin: 0 auto;">
+      <div style="max-width: 960px; margin: 0 auto;">
         <h2>Review Questions (${draft.questions.length})</h2>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Review, fix options, and select the correct answer for each question before publishing.</p>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions and configure sectional time limits below.</p>
 
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
-          <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question Manually</button>
-          <a href="#settings-anchor"><button class="btn-primary">Proceed to Exam Settings ↓</button></a>
+          <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question</button>
+          <a href="#settings-anchor"><button class="btn-primary">Proceed to Section & Exam Settings ↓</button></a>
         </div>
 
         <div>${qHtml}</div>
 
-        <!-- Exam Settings Section -->
+        <!-- Sectional Configuration Form -->
         <div class="card" id="settings-anchor" style="margin-top:40px; background:var(--bg-muted);">
-          <h3 style="margin-bottom:16px;">Exam Configuration</h3>
+          <h3 style="margin-bottom:8px;">Exam & Section Configuration</h3>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Configure individual time limits, lockouts, and cutoffs for each section.</p>
+
           <form id="exam-config-form">
-            <div class="form-row">
-              <div class="form-group">
-                <label>Exam / Topic Title</label>
-                <input type="text" id="cfg-title" value="${draft.title || 'Practice Mock Exam'}" required />
-              </div>
-              <div class="form-group">
-                <label>Total Duration (Minutes)</label>
-                <input type="number" id="cfg-duration" value="${draft.duration_minutes || 60}" min="1" required />
-              </div>
+            <div class="form-group">
+              <label>Exam / Paper Title</label>
+              <input type="text" id="cfg-title" value="${draft.title || 'Practice Mock Exam'}" required />
             </div>
 
+            <!-- Section-Wise Setup Table -->
+            <div style="margin:20px 0; background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
+              <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Sectional Rules & Time Limits</h4>
+              <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.9rem; text-align:left;">
+                  <thead>
+                    <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary);">
+                      <th style="padding:8px;">Section</th>
+                      <th style="padding:8px;">Questions</th>
+                      <th style="padding:8px;">Duration (Mins)</th>
+                      <th style="padding:8px;">Cutoff Score</th>
+                      <th style="padding:8px;">Allow Switch?</th>
+                      <th style="padding:8px;">Early Submit?</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${uniqueSecs.map((sec, sIdx) => {
+                      const count = draft.questions.filter(q => (q.section || 'General').trim() === sec).length;
+                      return `
+                        <tr style="border-bottom:1px solid var(--border-color);">
+                          <td style="padding:10px 8px;"><strong>${sec}</strong></td>
+                          <td style="padding:10px 8px;">${count}</td>
+                          <td style="padding:10px 8px;">
+                            <input type="number" id="sec-time-${sIdx}" value="${sIdx === 0 ? 60 : 60}" min="1" required style="width:90px;" />
+                          </td>
+                          <td style="padding:10px 8px;">
+                            <input type="number" id="sec-cutoff-${sIdx}" value="0" min="0" step="0.5" style="width:80px;" />
+                          </td>
+                          <td style="padding:10px 8px;">
+                            <select id="sec-switch-${sIdx}" style="width:110px;">
+                              <option value="false" selected>🔒 Locked</option>
+                              <option value="true">🔓 Allowed</option>
+                            </select>
+                          </td>
+                          <td style="padding:10px 8px;">
+                            <select id="sec-early-${sIdx}" style="width:120px;">
+                              <option value="true" selected>✅ Enabled</option>
+                              <option value="false">⏳ Wait Timer</option>
+                            </select>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+              <p style="font-size:0.82rem; color:var(--text-secondary); margin-top:10px;">
+                💡 <strong>Locked</strong> means the candidate cannot navigate to any other section until this section's time is exhausted (or submitted).
+                <strong>Wait Timer</strong> forces the candidate to wait for the entire section duration before moving to the next.
+              </p>
+            </div>
+
+            <!-- Marking Scheme -->
             <div class="form-row">
               <div class="form-group">
-                <label>Marks for Correct Answer</label>
+                <label>Marks for Correct</label>
                 <input type="number" step="0.01" id="cfg-marks-correct" value="1.0" required />
               </div>
               <div class="form-group">
-                <label>Negative Marks for Wrong Answer</label>
+                <label>Negative Marks for Wrong</label>
                 <input type="number" step="0.01" id="cfg-marks-incorrect" value="0.25" required />
               </div>
               <div class="form-group">
@@ -214,28 +261,30 @@ window.Host = {
 
             <div class="form-row">
               <div class="form-group">
-                <label>Passing Score Type</label>
+                <label>Overall Passing Type</label>
                 <select id="cfg-pass-type">
-                  <option value="PERCENT" ${draft.passing_score_type === 'PERCENT' ? 'selected' : ''}>Percentage (%)</option>
-                  <option value="MARKS" ${draft.passing_score_type === 'MARKS' ? 'selected' : ''}>Absolute Marks</option>
+                  <option value="PERCENT" selected>Percentage (%)</option>
+                  <option value="MARKS">Absolute Marks</option>
                 </select>
               </div>
               <div class="form-group">
-                <label>Passing Threshold</label>
-                <input type="number" step="0.1" id="cfg-pass-score" value="${draft.passing_score || 40}" required />
+                <label>Overall Passing Threshold</label>
+                <input type="number" step="0.1" id="cfg-pass-score" value="35" required />
               </div>
             </div>
 
             <div class="form-row" style="margin-top:10px;">
               <label style="display:flex; align-items:center; gap:8px;">
-                <input type="checkbox" id="cfg-shuffle-q" style="width:auto;" /> Shuffle Questions
+                <input type="checkbox" id="cfg-shuffle-q" style="width:auto;" checked /> Shuffle Questions (Intra-Section: Section A shuffles inside Section A, Section B inside Section B)
               </label>
               <label style="display:flex; align-items:center; gap:8px;">
-                <input type="checkbox" id="cfg-shuffle-opt" style="width:auto;" /> Shuffle Options
+                <input type="checkbox" id="cfg-shuffle-opt" style="width:auto;" checked /> Shuffle Options
               </label>
             </div>
 
-            <button type="submit" id="publish-submit-btn" class="btn-primary" style="width:100%; margin-top:24px; padding:12px; font-size:1.1rem;">Publish Exam & Generate Test Key</button>
+            <button type="submit" id="publish-submit-btn" class="btn-primary" style="width:100%; margin-top:24px; padding:14px; font-size:1.1rem;">
+              Publish Exam & Generate Test Key
+            </button>
           </form>
         </div>
       </div>
@@ -243,12 +292,15 @@ window.Host = {
 
     document.getElementById('exam-config-form').onsubmit = (e) => {
       e.preventDefault();
-      Host.saveAndPublishExam();
+      Host.saveAndPublishExam(uniqueSecs);
     };
   },
 
   updateQText(idx, val) { window.AppState.parsedExamDraft.questions[idx].question_text = val; },
-  updateQSection(idx, val) { window.AppState.parsedExamDraft.questions[idx].section = val; },
+  updateQSection(idx, val) {
+    window.AppState.parsedExamDraft.questions[idx].section = val;
+    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+  },
   setCorrectOption(qIdx, oIdx) { window.AppState.parsedExamDraft.questions[qIdx].correct_option_index = oIdx; },
   updateOptionText(qIdx, oIdx, val) { window.AppState.parsedExamDraft.questions[qIdx].options[oIdx] = val; },
   updateExplanation(idx, val) { window.AppState.parsedExamDraft.questions[idx].explanation = val; },
@@ -267,21 +319,19 @@ window.Host = {
   addQuestionManually() {
     window.AppState.parsedExamDraft.questions.push({
       num: window.AppState.parsedExamDraft.questions.length + 1,
-      section: 'General',
+      section: 'Section A',
       question_text: 'New Question Text',
-      options: ['Option 1', 'Option 2', 'Option 3', 'Option 4'],
+      options: ['Option A', 'Option B', 'Option C', 'Option D'],
       correct_option_index: 0,
-      explanation: '',
-      warnings: []
+      explanation: ''
     });
     Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
   },
 
-  // 3. Save to Supabase with Feedback Overlay
-  async saveAndPublishExam() {
+  // 3. Save to Supabase with Sectional Timing Parameters
+  async saveAndPublishExam(uniqueSecs) {
     const draft = window.AppState.parsedExamDraft;
     const title = document.getElementById('cfg-title').value.trim();
-    const duration = parseInt(document.getElementById('cfg-duration').value);
     const marksCorrect = parseFloat(document.getElementById('cfg-marks-correct').value);
     const marksIncorrect = parseFloat(document.getElementById('cfg-marks-incorrect').value);
     const marksUnatt = parseFloat(document.getElementById('cfg-marks-unatt').value);
@@ -290,7 +340,28 @@ window.Host = {
     const shuffleQ = document.getElementById('cfg-shuffle-q').checked;
     const shuffleOpt = document.getElementById('cfg-shuffle-opt').checked;
 
-    window.showLoading('Publishing Exam...', 'Saving question sets, calculating sections, and generating key...');
+    // Collect Section Configs & Compute Total Duration
+    let totalExamDuration = 0;
+    const sectionsConfig = uniqueSecs.map((secName, sIdx) => {
+      const dur = parseInt(document.getElementById(`sec-time-${sIdx}`).value) || 60;
+      const cut = parseFloat(document.getElementById(`sec-cutoff-${sIdx}`).value) || 0;
+      const allowSwitch = document.getElementById(`sec-switch-${sIdx}`).value === 'true';
+      const earlySubmit = document.getElementById(`sec-early-${sIdx}`).value === 'true';
+      totalExamDuration += dur;
+      return {
+        title: secName,
+        order_index: sIdx,
+        duration_minutes: dur,
+        cutoff_score: cut,
+        allow_switching: allowSwitch,
+        auto_advance: earlySubmit,
+        marks_correct: marksCorrect,
+        marks_incorrect: marksIncorrect,
+        marks_unattempted: marksUnatt
+      };
+    });
+
+    window.showLoading('Publishing Exam...', 'Saving sectional rules, timing limits, and generating key...');
 
     try {
       const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -309,12 +380,13 @@ window.Host = {
         if (!upErr) pdfUrl = filePath;
       }
 
+      // Insert Test
       const { data: testRecord, error: testErr } = await window.sb
         .from('tests')
         .insert({
           test_key: code,
           title,
-          duration_minutes: duration,
+          duration_minutes: totalExamDuration,
           has_sections: true,
           shuffle_questions: shuffleQ,
           shuffle_options: shuffleOpt,
@@ -328,33 +400,40 @@ window.Host = {
 
       if (testErr) throw new Error(testErr.message);
 
-      const uniqueSecs = Array.from(new Set(draft.questions.map(q => q.section || 'General')));
-      const secInsertPayload = uniqueSecs.map((s, sIdx) => ({
+      // Insert Sections
+      const secInsertPayload = sectionsConfig.map(sc => ({
         test_id: testRecord.id,
-        title: s,
-        order_index: sIdx,
-        marks_correct: marksCorrect,
-        marks_incorrect: marksIncorrect,
-        marks_unattempted: marksUnatt
+        title: sc.title,
+        order_index: sc.order_index,
+        duration_minutes: sc.duration_minutes,
+        cutoff_score: sc.cutoff_score,
+        allow_switching: sc.allow_switching,
+        auto_advance: sc.auto_advance,
+        marks_correct: sc.marks_correct,
+        marks_incorrect: sc.marks_incorrect,
+        marks_unattempted: sc.marks_unattempted
       }));
 
-      const { data: insertedSections } = await window.sb
+      const { data: insertedSections, error: secErr } = await window.sb
         .from('sections')
         .insert(secInsertPayload)
         .select();
 
-      const secMap = {};
-      if (insertedSections) {
-        insertedSections.forEach(s => { secMap[s.title] = s.id; });
-      }
+      if (secErr) throw new Error(secErr.message);
 
+      const secMap = {};
+      insertedSections.forEach(s => { secMap[s.title] = s.id; });
+
+      // Group questions by section to enforce strict intra-section order
       for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
         const q = draft.questions[qIdx];
-        const { data: qRecord } = await window.sb
+        const secId = secMap[(q.section || 'General').trim()] || insertedSections[0].id;
+
+        const { data: qRecord, error: qErr } = await window.sb
           .from('questions')
           .insert({
             test_id: testRecord.id,
-            section_id: secMap[q.section || 'General'] || null,
+            section_id: secId,
             order_index: qIdx,
             question_text: q.question_text,
             correct_option_index: q.correct_option_index,
@@ -380,19 +459,18 @@ window.Host = {
       const portalUrl = `https://mockorbit-cbt.vercel.app`;
       const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
         `📌 *Exam:* ${title}\n` +
-        `⏱️ *Duration:* ${duration} mins\n` +
-        `🎯 *Marking:* +${marksCorrect} for correct, -${marksIncorrect} for incorrect\n` +
-        `🏆 *Passing:* ${passScore} ${passType === 'PERCENT' ? '%' : 'Marks'}\n\n` +
+        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}:${s.duration_minutes}m`).join(' | ')})\n` +
+        `🎯 *Marking:* +${marksCorrect} / -${marksIncorrect}\n\n` +
         `🔑 *Test Key:* ${code}\n` +
         `🔗 *Direct Test Link:* ${examUrl}\n\n` +
-        `Login to your student account and enter the key at: ${portalUrl}`;
+        `Login and enter the key at: ${portalUrl}`;
 
       const targetRoot = document.getElementById('sub-view-root') || document.getElementById('app-root');
       targetRoot.innerHTML = `
         <div class="card" style="max-width:620px; margin:30px auto; text-align:center;">
           <div style="font-size:2.8rem; margin-bottom:8px;">🎉</div>
           <h2>Exam Published Successfully!</h2>
-          <p style="color:var(--text-secondary); margin-bottom:20px;">Your exam is ready for students. Share the details below:</p>
+          <p style="color:var(--text-secondary); margin-bottom:20px;">Your sectional exam is live. Share the key with candidates:</p>
           
           <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
             ${code}
@@ -400,25 +478,19 @@ window.Host = {
 
           <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
             <p><strong>Exam Name:</strong> ${title}</p>
-            <p><strong>Duration:</strong> ${duration} Minutes</p>
+            <p><strong>Sections:</strong> ${sectionsConfig.map(s => `${s.title} (${s.duration_minutes}m, Cutoff:${s.cutoff_score})`).join(' → ')}</p>
+            <p><strong>Total Duration:</strong> ${totalExamDuration} Minutes</p>
             <p><strong>Marking:</strong> +${marksCorrect} / -${marksIncorrect}</p>
             <p><strong>Test Key:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${code}</span></p>
-            <p style="margin-top:6px; word-break:break-all;"><strong>Direct Link:</strong> <a href="${examUrl}" target="_blank">${examUrl}</a></p>
           </div>
 
           <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
             <button class="btn-primary" style="width:100%; padding:11px;" onclick="Host.copyInviteText(\`${encodeURIComponent(shareMessage)}\`)">
-              📋 Copy Complete Student Invitation
+              📋 Copy Student Invitation
             </button>
-            
-            <div style="display:flex; gap:10px;">
-              <button class="btn-secondary" style="flex:1;" onclick="Host.shareViaWhatsApp(\`${encodeURIComponent(shareMessage)}\`)">
-                💬 Share on WhatsApp
-              </button>
-              <button class="btn-secondary" style="flex:1;" onclick="Host.triggerNativeShare(\`${encodeURIComponent(title)}\`, \`${encodeURIComponent(shareMessage)}\`, \`${encodeURIComponent(examUrl)}\`)">
-                📲 Share / Send
-              </button>
-            </div>
+            <button class="btn-secondary" style="width:100%;" onclick="Host.shareViaWhatsApp(\`${encodeURIComponent(shareMessage)}\`)">
+              💬 Share on WhatsApp
+            </button>
           </div>
 
           <a href="#/host/tests"><button class="btn-outline" style="width:100%;">View All My Tests</button></a>
@@ -433,28 +505,15 @@ window.Host = {
   copyInviteText(encodedText) {
     const text = decodeURIComponent(encodedText);
     navigator.clipboard.writeText(text).then(() => {
-      window.showToast('Complete invitation copied to clipboard!', 'success');
+      window.showToast('Invitation copied to clipboard!', 'success');
     }).catch(() => {
-      window.showToast('Could not copy automatically. Please copy manually.', 'warning');
+      window.showToast('Please copy manually.', 'warning');
     });
   },
 
   shareViaWhatsApp(encodedText) {
     const text = decodeURIComponent(encodedText);
-    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-    window.open(waUrl, '_blank');
-  },
-
-  triggerNativeShare(titleEnc, textEnc, urlEnc) {
-    const title = decodeURIComponent(titleEnc);
-    const text = decodeURIComponent(textEnc);
-    const url = decodeURIComponent(urlEnc);
-
-    if (navigator.share) {
-      navigator.share({ title, text, url }).catch(() => {});
-    } else {
-      this.copyInviteText(textEnc);
-    }
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   },
 
   // 4. My Tests List
@@ -463,7 +522,7 @@ window.Host = {
 
     const { data: tests, error } = await window.sb
       .from('tests')
-      .select('*, attempts(count)')
+      .select('*, attempts(count), sections(*)')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -475,7 +534,7 @@ window.Host = {
       container.innerHTML = `
         <div class="card" style="text-align:center; padding:40px;">
           <h3>No Tests Uploaded Yet</h3>
-          <p style="color:var(--text-secondary); margin:12px 0;">Upload your first exam PDF to start practice tests.</p>
+          <p style="color:var(--text-secondary); margin:12px 0;">Upload your first exam paper to get started.</p>
           <a href="#/host/upload"><button class="btn-primary">Upload Test</button></a>
         </div>
       `;
@@ -484,12 +543,16 @@ window.Host = {
 
     const listHtml = tests.map(t => {
       const attemptCount = t.attempts && t.attempts[0] ? t.attempts[0].count : 0;
+      const secSummary = t.sections && t.sections.length > 0
+        ? t.sections.map(s => `${s.title} (${s.duration_minutes || t.duration_minutes}m)`).join(', ')
+        : `${t.duration_minutes} min`;
+
       return `
-        <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:12px;">
           <div>
             <h3 style="margin-bottom:4px;">${t.title}</h3>
             <p style="color:var(--text-secondary); font-size:0.9rem;">
-              Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Duration: ${t.duration_minutes} min | Attempts: ${attemptCount}
+              Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Sections: ${secSummary} | Attempts: ${attemptCount}
             </p>
           </div>
           <div style="display:flex; gap:8px;">
@@ -515,7 +578,7 @@ window.Host = {
   deleteTest(testId) {
     window.showModal({
       title: 'Delete Test?',
-      bodyHtml: 'Are you sure you want to permanently delete this test? All associated candidate attempts and question records will be deleted.',
+      bodyHtml: 'Are you sure you want to permanently delete this test? All questions, sections, and candidate attempts will be removed.',
       confirmText: 'Delete Permanently',
       danger: true,
       onConfirm: async () => {
