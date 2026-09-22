@@ -279,6 +279,7 @@ window.Host = {
       this.editingTestId = testId;
       window.AppState.parsedExamDraft = {
         title: test.title,
+        folder_id: test.folder_id || null,
         duration_minutes: test.duration_minutes,
         existingSections: test.sections || [],
         passing_score_type: test.passing_score_type || 'PERCENT',
@@ -296,7 +297,7 @@ window.Host = {
   },
 
   // 3. Review & Sectional Settings View
-  renderReview(container) {
+  async renderReview(container) {
     const target = this.getTarget(container);
     if (!target) return;
 
@@ -305,6 +306,10 @@ window.Host = {
       window.location.hash = '#/host/upload';
       return;
     }
+
+    // Fetch existing folders for the dropdown
+    const { data: folders } = await window.sb.from('folders').select('*').order('name');
+    const folderList = folders || [];
 
     const uniqueSecs = [];
     draft.questions.forEach(q => {
@@ -352,9 +357,9 @@ window.Host = {
           <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
             ${(q.options || []).map((opt, oIndex) => `
               <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex}, ${oIndex})">
+                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex}, ${oIndex}, this.value)" />
+                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex}, ${oIndex})">✕</button>
               </div>
             `).join('')}
           </div>
@@ -374,7 +379,7 @@ window.Host = {
           <h2>${isEditing ? '✏️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>
           ${isEditing ? `<span style="background:#e0f2fe; color:#0369a1; padding:4px 12px; border-radius:14px; font-weight:700; font-size:0.85rem;">Editing Existing Test</span>` : ''}
         </div>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions, edit text or options, and configure section rules below.</p>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions, assign a folder, and configure section rules below.</p>
 
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question</button>
@@ -386,12 +391,23 @@ window.Host = {
         <!-- Sectional Configuration Form -->
         <div class="card" id="settings-anchor" style="margin-top:40px; background:var(--bg-muted);">
           <h3 style="margin-bottom:8px;">Exam & Section Configuration</h3>
-          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Configure section time limits, navigation rules, and intra-section shuffling.</p>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Assign to a folder and configure timings.</p>
 
           <form id="exam-config-form">
-            <div class="form-group">
-              <label>Exam / Paper Title</label>
-              <input type="text" id="cfg-title" value="${draft.title || 'Practice Mock Exam'}" required />
+            <div class="form-row">
+              <div class="form-group" style="flex:2;">
+                <label>Exam / Paper Title</label>
+                <input type="text" id="cfg-title" value="${draft.title || 'Practice Mock Exam'}" required />
+              </div>
+              <div class="form-group" style="flex:1;">
+                <label>Assign to Folder</label>
+                <select id="cfg-folder">
+                  <option value="">(No Folder / Standalone)</option>
+                  ${folderList.map(f => `
+                    <option value="${f.id}" ${draft.folder_id === f.id ? 'selected' : ''}>📁 ${f.name}</option>
+                  `).join('')}
+                </select>
+              </div>
             </div>
 
             <!-- Section-Wise Setup Table -->
@@ -539,6 +555,7 @@ window.Host = {
     const draft = window.AppState.parsedExamDraft;
     const isEditing = !!this.editingTestId;
     const title = document.getElementById('cfg-title').value.trim();
+    const folderId = document.getElementById('cfg-folder').value || null;
     const marksCorrect = parseFloat(document.getElementById('cfg-marks-correct').value);
     const marksIncorrect = parseFloat(document.getElementById('cfg-marks-incorrect').value);
     const marksUnatt = parseFloat(document.getElementById('cfg-marks-unatt').value);
@@ -589,6 +606,7 @@ window.Host = {
           .from('tests')
           .update({
             title,
+            folder_id: folderId,
             duration_minutes: totalExamDuration,
             has_sections: true,
             shuffle_questions: shuffleQ,
@@ -625,6 +643,7 @@ window.Host = {
           .insert({
             test_key: code,
             title,
+            folder_id: folderId,
             duration_minutes: totalExamDuration,
             has_sections: true,
             shuffle_questions: shuffleQ,
@@ -706,7 +725,7 @@ window.Host = {
       const portalUrl = `https://mockorbit-cbt.vercel.app`;
       const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
         `📌 *Exam:* ${title}\n` +
-        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}:${s.duration_minutes}m`).join(' | ')})\n` +
+        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}: ${s.duration_minutes}m`).join(' | ')})\n` +
         `🎯 *Marking:* +${marksCorrect} / -${marksIncorrect}\n\n` +
         `🔑 *Test Key:* ${code}\n` +
         `🔗 *Direct Test Link:* ${examUrl}\n\n` +
@@ -764,24 +783,222 @@ window.Host = {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   },
 
-  // 5. My Tests List
+  // 5. Folders & Allocation Management
+  async renderFolderManager(container) {
+    const target = this.getTarget(container);
+    if (!target) return;
+
+    target.innerHTML = `<div class="card"><p>Loading folder management...</p></div>`;
+
+    const [foldersRes, testsRes, allocRes, profRes] = await Promise.all([
+      window.sb.from('folders').select('*').order('created_at', { ascending: false }),
+      window.sb.from('tests').select('id, title, folder_id'),
+      window.sb.from('folder_allocations').select('*'),
+      window.sb.from('profiles').select('id, email, full_name, role').eq('role', 'USER').order('email')
+    ]);
+
+    const folders = foldersRes.data || [];
+    const tests = testsRes.data || [];
+    const allocations = allocRes.data || [];
+    const students = profRes.data || [];
+
+    target.innerHTML = `
+      <div style="max-width:1000px; margin:0 auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+          <div>
+            <h2>Test Folders & Student Allocations</h2>
+            <p style="color:var(--text-secondary); font-size:0.95rem;">Group your exams into folders (e.g. IOCL, GATE) and allocate entire folders to specific students.</p>
+          </div>
+          <button class="btn-primary" onclick="Host.promptCreateFolder()">+ New Folder</button>
+        </div>
+
+        <!-- Folder List -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:16px;">
+          ${folders.length === 0 ? `
+            <div class="card" style="grid-column:1/-1; text-align:center; padding:40px;">
+              <h3>No Folders Created Yet</h3>
+              <p style="color:var(--text-secondary); margin:10px 0;">Create a folder like "IOCL Test Series" or "GATE Prep" to group tests and assign them to students.</p>
+              <button class="btn-primary" onclick="Host.promptCreateFolder()">Create First Folder</button>
+            </div>
+          ` : folders.map(f => {
+            const folderTests = tests.filter(t => t.folder_id === f.id);
+            const folderAllocs = allocations.filter(a => a.folder_id === f.id);
+
+            return `
+              <div class="card" style="border-top:4px solid #0284c7; display:flex; flex-direction:column; justify-content:space-between;">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                    <div style="font-size:1.6rem;">📁</div>
+                    <div style="display:flex; gap:6px;">
+                      <button class="btn-outline" style="padding:3px 8px; font-size:0.75rem;" onclick="Host.promptEditFolder('${f.id}', '${f.name.replace(/'/g, "\\'")}')">Rename</button>
+                      <button class="btn-danger" style="padding:3px 8px; font-size:0.75rem;" onclick="Host.deleteFolder('${f.id}', '${f.name.replace(/'/g, "\\'")}')">Delete</button>
+                    </div>
+                  </div>
+                  <h3 style="margin-bottom:6px;">${f.name}</h3>
+                  <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:12px;">
+                    📚 <strong>${folderTests.length}</strong> Tests &nbsp;|&nbsp; 👥 <strong>${folderAllocs.length}</strong> Students Assigned
+                  </p>
+                </div>
+
+                <div style="border-top:1px solid var(--border-color); padding-top:12px; margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+                  <button class="btn-secondary" style="font-size:0.85rem; padding:6px 12px; width:100%;" onclick="Host.openAllocationModal('${f.id}', '${f.name.replace(/'/g, "\\'")}')">
+                    👥 Manage Student Access
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  },
+
+  promptCreateFolder() {
+    const name = prompt('Enter new folder name (e.g. "IOCL Technical Series", "GATE CS"):');
+    if (!name || !name.trim()) return;
+    this.createFolder(name.trim());
+  },
+
+  async createFolder(name) {
+    const { error } = await window.sb.from('folders').insert({
+      name,
+      created_by: window.AppState.user.id
+    });
+    if (error) {
+      window.showToast(error.message, 'error');
+    } else {
+      window.showToast(`Folder "${name}" created!`, 'success');
+      this.renderFolderManager();
+    }
+  },
+
+  promptEditFolder(folderId, currentName) {
+    const newName = prompt('Edit folder name:', currentName);
+    if (!newName || !newName.trim() || newName.trim() === currentName) return;
+    this.updateFolderName(folderId, newName.trim());
+  },
+
+  async updateFolderName(folderId, newName) {
+    const { error } = await window.sb.from('folders').update({ name: newName }).eq('id', folderId);
+    if (error) {
+      window.showToast(error.message, 'error');
+    } else {
+      window.showToast('Folder renamed successfully.', 'success');
+      this.renderFolderManager();
+    }
+  },
+
+  deleteFolder(folderId, folderName) {
+    window.showModal({
+      title: `Delete Folder "${folderName}"?`,
+      bodyHtml: `
+        <p>Are you sure you want to delete this folder?</p>
+        <p style="margin-top:6px; font-size:0.85rem; color:var(--text-secondary);">
+          Tests inside this folder will <strong>not</strong> be deleted; they will simply become standalone unfiled tests.
+        </p>
+      `,
+      confirmText: 'Delete Folder',
+      danger: true,
+      onConfirm: async () => {
+        const { error } = await window.sb.from('folders').delete().eq('id', folderId);
+        if (error) {
+          window.showToast(error.message, 'error');
+        } else {
+          window.showToast('Folder deleted.', 'success');
+          Host.renderFolderManager();
+        }
+      }
+    });
+  },
+
+  async openAllocationModal(folderId, folderName) {
+    window.showLoading('Loading Students...', 'Fetching candidate list for allocation...');
+
+    const [studentsRes, allocsRes] = await Promise.all([
+      window.sb.from('profiles').select('id, email, full_name, role').eq('role', 'USER').order('email'),
+      window.sb.from('folder_allocations').select('user_id').eq('folder_id', folderId)
+    ]);
+
+    window.hideLoading();
+
+    const students = studentsRes.data || [];
+    const assignedUserIds = new Set((allocsRes.data || []).map(a => a.user_id));
+
+    if (students.length === 0) {
+      window.showToast('No registered candidates found to allocate.', 'warning');
+      return;
+    }
+
+    const modalBody = `
+      <p style="margin-bottom:12px; font-size:0.9rem; color:var(--text-secondary);">
+        Select which registered candidates should have direct access to tests in <strong>${folderName}</strong> without typing test keys:
+      </p>
+      <div style="max-height:280px; overflow-y:auto; border:1px solid var(--border-color); border-radius:6px; padding:10px; background:var(--bg-muted);">
+        ${students.map(s => {
+          const isChecked = assignedUserIds.has(s.id);
+          return `
+            <label style="display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:4px; cursor:pointer; font-size:0.9rem; transition:background 0.15s;" onmouseover="this.style.background='#fff'" onmouseout="this.style.background='transparent'">
+              <input type="checkbox" class="student-alloc-cb" value="${s.id}" ${isChecked ? 'checked' : ''} style="width:18px; height:18px;" />
+              <div>
+                <strong>${s.full_name || 'No Name'}</strong>
+                <span style="font-size:0.8rem; color:var(--text-secondary); margin-left:6px;">(${s.email})</span>
+              </div>
+            </label>
+          `;
+        }).join('')}
+      </div>
+    `;
+
+    window.showModal({
+      title: `Allocate "${folderName}"`,
+      bodyHtml: modalBody,
+      confirmText: 'Save Allocations',
+      onConfirm: async () => {
+        const checkedInputs = document.querySelectorAll('.student-alloc-cb:checked');
+        const selectedUserIds = Array.from(checkedInputs).map(cb => cb.value);
+
+        window.showLoading('Saving Allocations...', 'Updating student access records...');
+
+        // Clear existing allocations for this folder
+        await window.sb.from('folder_allocations').delete().eq('folder_id', folderId);
+
+        // Insert new selected allocations
+        if (selectedUserIds.length > 0) {
+          const insertPayload = selectedUserIds.map(uId => ({
+            folder_id: folderId,
+            user_id: uId
+          }));
+          await window.sb.from('folder_allocations').insert(insertPayload);
+        }
+
+        window.hideLoading();
+        window.showToast(`Updated allocations for ${folderName}!`, 'success');
+        Host.renderFolderManager();
+      }
+    });
+  },
+
+  // 6. My Tests List (Grouped by Folder)
   async renderMyTests(container) {
     const target = this.getTarget(container);
     if (!target) return;
 
     target.innerHTML = `<div class="card"><p>Loading your exams...</p></div>`;
 
-    const { data: tests, error } = await window.sb
-      .from('tests')
-      .select('*, attempts(count), sections(*)')
-      .order('created_at', { ascending: false });
+    const [testsRes, foldersRes] = await Promise.all([
+      window.sb.from('tests').select('*, attempts(count), sections(*)').order('created_at', { ascending: false }),
+      window.sb.from('folders').select('*').order('name')
+    ]);
 
-    if (error) {
-      target.innerHTML = `<div class="card"><p>Error: ${error.message}</p></div>`;
+    if (testsRes.error) {
+      target.innerHTML = `<div class="card"><p>Error: ${testsRes.error.message}</p></div>`;
       return;
     }
 
-    if (!tests || tests.length === 0) {
+    const tests = testsRes.data || [];
+    const folders = foldersRes.data || [];
+
+    if (tests.length === 0) {
       target.innerHTML = `
         <div class="card" style="text-align:center; padding:40px;">
           <h3>No Tests Uploaded Yet</h3>
@@ -792,37 +1009,71 @@ window.Host = {
       return;
     }
 
-    const listHtml = tests.map(t => {
-      const attemptCount = t.attempts && t.attempts[0] ? t.attempts[0].count : 0;
-      const secSummary = t.sections && t.sections.length > 0
-        ? t.sections.map(s => `${s.title} (${s.duration_minutes || t.duration_minutes}m)`).join(', ')
-        : `${t.duration_minutes} min`;
+    // Group tests by folder
+    const folderMap = { 'unfiled': { name: 'Standalone / Unfiled Tests', tests: [] } };
+    folders.forEach(f => {
+      folderMap[f.id] = { name: f.name, tests: [] };
+    });
+
+    tests.forEach(t => {
+      if (t.folder_id && folderMap[t.folder_id]) {
+        folderMap[t.folder_id].tests.push(t);
+      } else {
+        folderMap['unfiled'].tests.push(t);
+      }
+    });
+
+    const groupsHtml = Object.keys(folderMap).map(fId => {
+      const group = folderMap[fId];
+      if (group.tests.length === 0) return '';
+
+      const testItems = group.tests.map(t => {
+        const attemptCount = t.attempts && t.attempts[0] ? t.attempts[0].count : 0;
+        const secSummary = t.sections && t.sections.length > 0
+          ? t.sections.map(s => `${s.title} (${s.duration_minutes || t.duration_minutes}m)`).join(', ')
+          : `${t.duration_minutes} min`;
+
+        return `
+          <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:10px;">
+            <div>
+              <h4 style="margin-bottom:4px; font-size:1.05rem;">${t.title}</h4>
+              <p style="color:var(--text-secondary); font-size:0.88rem;">
+                Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Sections: ${secSummary} | Attempts: ${attemptCount}
+              </p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn-primary" style="padding:6px 12px; font-size:0.85rem;" onclick="Host.loadTestForEdit('${t.id}')">✏️ Edit</button>
+              <button class="btn-outline" onclick="navigator.clipboard.writeText('${t.test_key}'); window.showToast('Copied test key!', 'success');">Copy Key</button>
+              <a href="#/instructions/${t.test_key}"><button class="btn-secondary">Preview</button></a>
+              <button class="btn-danger" onclick="Host.deleteTest('${t.id}')">Delete</button>
+            </div>
+          </div>
+        `;
+      }).join('');
 
       return `
-        <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:12px;">
-          <div>
-            <h3 style="margin-bottom:4px;">${t.title}</h3>
-            <p style="color:var(--text-secondary); font-size:0.9rem;">
-              Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Sections: ${secSummary} | Attempts: ${attemptCount}
-            </p>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn-primary" style="padding:6px 12px; font-size:0.85rem;" onclick="Host.loadTestForEdit('${t.id}')">✏️ Edit</button>
-            <button class="btn-outline" onclick="navigator.clipboard.writeText('${t.test_key}'); window.showToast('Copied test key!', 'success');">Copy Key</button>
-            <a href="#/instructions/${t.test_key}"><button class="btn-secondary">Preview</button></a>
-            <button class="btn-danger" onclick="Host.deleteTest('${t.id}')">Delete</button>
-          </div>
+        <div style="margin-bottom:28px;">
+          <h3 style="display:flex; align-items:center; gap:8px; margin-bottom:12px; font-size:1.2rem; color:var(--primary-accent);">
+            <span>📁</span> ${group.name} (${group.tests.length})
+          </h3>
+          ${testItems}
         </div>
       `;
     }).join('');
 
     target.innerHTML = `
       <div style="max-width:1000px; margin:0 auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-          <h2>My Uploaded Tests</h2>
-          <a href="#/host/upload"><button class="btn-primary">+ Upload New Test</button></a>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+          <div>
+            <h2>My Uploaded Tests</h2>
+            <p style="color:var(--text-secondary); font-size:0.95rem;">Manage your published tests grouped by their folders.</p>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <a href="#/host/folders"><button class="btn-secondary">📁 Manage Folders</button></a>
+            <a href="#/host/upload"><button class="btn-primary">+ Upload New Test</button></a>
+          </div>
         </div>
-        ${listHtml}
+        ${groupsHtml}
       </div>
     `;
   },
@@ -845,7 +1096,7 @@ window.Host = {
     });
   },
 
-  // 6. User Access Management
+  // 7. User Access Management
   async renderUserManager(container) {
     const target = this.getTarget(container);
     if (!target) return;
@@ -964,7 +1215,7 @@ window.Host = {
     });
   },
 
-  // 7. View All Candidate Attempts
+  // 8. View All Candidate Attempts
   async renderAllHistory(container) {
     const target = this.getTarget(container);
     if (!target) return;
