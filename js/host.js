@@ -12,7 +12,7 @@ window.Host = {
         <div id="drop-zone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: pointer; background: var(--bg-muted); margin-bottom: 20px;">
           <div style="font-size: 2.2rem; margin-bottom: 8px;">📄</div>
           <p style="font-weight: 600; margin-bottom: 4px;">Click to browse or drop PDF here</p>
-          <p style="font-size: 0.85rem; color: var(--text-secondary);">Supports multi-section question papers</p>
+          <p style="font-size: 0.85rem; color: var(--text-secondary);">Supports multi-section question papers and linked statement questions</p>
           <input type="file" id="pdf-input" accept="application/pdf" style="display: none;" />
         </div>
 
@@ -69,7 +69,7 @@ window.Host = {
       try {
         const parsed = await PdfParser.parseFile(file, (percent) => {
           progressBar.style.width = percent + '%';
-          statusLabel.innerText = `Parsing sections & questions... ${percent}%`;
+          statusLabel.innerText = `Parsing sections, linked groups & questions... ${percent}%`;
         });
 
         parsed.originalFile = file;
@@ -138,6 +138,8 @@ window.Host = {
         {
           num: 1,
           section: 'Section A',
+          group_id: null,
+          shared_context: '',
           question_text: 'Enter your question text here',
           options: ['Option A', 'Option B', 'Option C', 'Option D'],
           correct_option_index: 0,
@@ -156,7 +158,6 @@ window.Host = {
       return;
     }
 
-    // Detect unique sections in order of appearance
     const uniqueSecs = [];
     draft.questions.forEach(q => {
       const secName = (q.section || 'General').trim();
@@ -164,12 +165,24 @@ window.Host = {
     });
 
     let qHtml = draft.questions.map((q, qIndex) => {
+      const isGrouped = !!q.group_id;
       return `
-        <div class="card" style="margin-bottom:16px;" id="q-card-${qIndex}">
+        <div class="card" style="margin-bottom:16px; ${isGrouped ? 'border-left: 4px solid var(--primary-accent);' : ''}" id="q-card-${qIndex}">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <span style="font-weight:700;">Question #${qIndex + 1} <span style="font-size:0.8rem; background:var(--accent-soft); color:var(--primary-accent); padding:2px 6px; border-radius:4px; margin-left:8px;">${q.section || 'General'}</span></span>
+            <div>
+              <span style="font-weight:700;">Question #${qIndex + 1}</span>
+              <span style="font-size:0.8rem; background:var(--accent-soft); color:var(--primary-accent); padding:2px 6px; border-radius:4px; margin-left:8px;">${q.section || 'General'}</span>
+              ${isGrouped ? `<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:600;">🔗 Linked Group</span>` : ''}
+            </div>
             <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteQuestion(${qIndex})">Delete</button>
           </div>
+
+          ${isGrouped ? `
+            <div class="form-group" style="background:var(--bg-muted); padding:10px; border-radius:var(--radius-sm); margin-bottom:12px;">
+              <label style="color:var(--text-secondary); font-size:0.8rem; margin-bottom:4px;">Shared Group Context / Passage (Linked across group)</label>
+              <textarea rows="2" style="font-size:0.88rem;" onchange="Host.updateQGroupContext(${qIndex}, this.value)">${q.shared_context || ''}</textarea>
+            </div>
+          ` : ''}
 
           <div class="form-group">
             <label>Question Text</label>
@@ -185,9 +198,9 @@ window.Host = {
           <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
             ${q.options.map((opt, oIndex) => `
               <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex}, ${oIndex})">
+                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex}, ${oIndex}, this.value)" />
+                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex}, ${oIndex})">✕</button>
               </div>
             `).join('')}
           </div>
@@ -204,7 +217,7 @@ window.Host = {
     container.innerHTML = `
       <div style="max-width: 960px; margin: 0 auto;">
         <h2>Review Questions (${draft.questions.length})</h2>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions and configure sectional time limits below.</p>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Linked questions share identical statements and will be grouped together during the exam.</p>
 
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question</button>
@@ -216,7 +229,7 @@ window.Host = {
         <!-- Sectional Configuration Form -->
         <div class="card" id="settings-anchor" style="margin-top:40px; background:var(--bg-muted);">
           <h3 style="margin-bottom:8px;">Exam & Section Configuration</h3>
-          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Configure individual time limits, lockouts, and cutoffs for each section.</p>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Configure section time limits, navigation rules, and intra-section shuffling.</p>
 
           <form id="exam-config-form">
             <div class="form-group">
@@ -270,10 +283,6 @@ window.Host = {
                   </tbody>
                 </table>
               </div>
-              <p style="font-size:0.82rem; color:var(--text-secondary); margin-top:10px;">
-                💡 <strong>Locked</strong> means the candidate cannot navigate to any other section until this section's time is exhausted (or submitted).
-                <strong>Wait Timer</strong> forces the candidate to wait for the entire section duration before moving to the next.
-              </p>
             </div>
 
             <!-- Marking Scheme -->
@@ -308,10 +317,8 @@ window.Host = {
 
             <div class="form-row" style="margin-top:10px;">
               <label style="display:flex; align-items:center; gap:8px;">
-                <input type="checkbox" id="cfg-shuffle-q" style="width:auto;" checked /> Shuffle Questions (Intra-Section: Section A shuffles inside Section A, Section B inside Section B)
-              </label>
-              <label style="display:flex; align-items:center; gap:8px;">
-                <input type="checkbox" id="cfg-shuffle-opt" style="width:auto;" checked /> Shuffle Options
+                <input type="checkbox" id="cfg-shuffle-q" style="width:auto;" checked /> 
+                Intra-Section Shuffling (Shuffles questions within each section while keeping linked group questions together)
               </label>
             </div>
 
@@ -334,6 +341,7 @@ window.Host = {
     window.AppState.parsedExamDraft.questions[idx].section = val;
     Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
   },
+  updateQGroupContext(idx, val) { window.AppState.parsedExamDraft.questions[idx].shared_context = val; },
   setCorrectOption(qIdx, oIdx) { window.AppState.parsedExamDraft.questions[qIdx].correct_option_index = oIdx; },
   updateOptionText(qIdx, oIdx, val) { window.AppState.parsedExamDraft.questions[qIdx].options[oIdx] = val; },
   updateExplanation(idx, val) { window.AppState.parsedExamDraft.questions[idx].explanation = val; },
@@ -353,6 +361,8 @@ window.Host = {
     window.AppState.parsedExamDraft.questions.push({
       num: window.AppState.parsedExamDraft.questions.length + 1,
       section: 'Section A',
+      group_id: null,
+      shared_context: '',
       question_text: 'New Question Text',
       options: ['Option A', 'Option B', 'Option C', 'Option D'],
       correct_option_index: 0,
@@ -361,7 +371,7 @@ window.Host = {
     Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
   },
 
-  // 3. Save to Supabase with Sectional Timing Parameters
+  // 3. Save to Supabase with Sectional Timing & Linked Group Parameters
   async saveAndPublishExam(uniqueSecs) {
     const draft = window.AppState.parsedExamDraft;
     const title = document.getElementById('cfg-title').value.trim();
@@ -371,9 +381,7 @@ window.Host = {
     const passType = document.getElementById('cfg-pass-type').value;
     const passScore = parseFloat(document.getElementById('cfg-pass-score').value);
     const shuffleQ = document.getElementById('cfg-shuffle-q').checked;
-    const shuffleOpt = document.getElementById('cfg-shuffle-opt').checked;
 
-    // Collect Section Configs & Compute Total Duration
     let totalExamDuration = 0;
     const sectionsConfig = uniqueSecs.map((secName, sIdx) => {
       const dur = parseInt(document.getElementById(`sec-time-${sIdx}`).value) || 60;
@@ -394,7 +402,7 @@ window.Host = {
       };
     });
 
-    window.showLoading('Publishing Exam...', 'Saving sectional rules, timing limits, and generating key...');
+    window.showLoading('Publishing Exam...', 'Saving sectional rules, linked question groups, and generating key...');
 
     try {
       const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -422,7 +430,7 @@ window.Host = {
           duration_minutes: totalExamDuration,
           has_sections: true,
           shuffle_questions: shuffleQ,
-          shuffle_options: shuffleOpt,
+          shuffle_options: false,
           passing_score_type: passType,
           passing_score: passScore,
           pdf_url: pdfUrl,
@@ -457,18 +465,23 @@ window.Host = {
       const secMap = {};
       insertedSections.forEach(s => { secMap[s.title] = s.id; });
 
-      // Group questions by section to enforce strict intra-section order
       for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
         const q = draft.questions[qIdx];
         const secId = secMap[(q.section || 'General').trim()] || insertedSections[0].id;
 
-        const { data: qRecord, error: qErr } = await window.sb
+        // If a shared context exists, embed a clean header tag so it can be reconstructed seamlessly
+        let formattedQuestionText = q.question_text;
+        if (q.shared_context) {
+          formattedQuestionText = `[SHARED_GROUP:${q.group_id || 'default'}|${q.shared_context}]\n${q.question_text}`;
+        }
+
+        const { data: qRecord } = await window.sb
           .from('questions')
           .insert({
             test_id: testRecord.id,
             section_id: secId,
             order_index: qIdx,
-            question_text: q.question_text,
+            question_text: formattedQuestionText,
             correct_option_index: q.correct_option_index,
             explanation: q.explanation
           })
@@ -503,7 +516,7 @@ window.Host = {
         <div class="card" style="max-width:620px; margin:30px auto; text-align:center;">
           <div style="font-size:2.8rem; margin-bottom:8px;">🎉</div>
           <h2>Exam Published Successfully!</h2>
-          <p style="color:var(--text-secondary); margin-bottom:20px;">Your sectional exam is live. Share the key with candidates:</p>
+          <p style="color:var(--text-secondary); margin-bottom:20px;">Your sectional exam is live with linked group shuffling enabled.</p>
           
           <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
             ${code}
@@ -511,9 +524,8 @@ window.Host = {
 
           <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
             <p><strong>Exam Name:</strong> ${title}</p>
-            <p><strong>Sections:</strong> ${sectionsConfig.map(s => `${s.title} (${s.duration_minutes}m, Cutoff:${s.cutoff_score})`).join(' → ')}</p>
+            <p><strong>Sections:</strong> ${sectionsConfig.map(s => `${s.title} (${s.duration_minutes}m)`).join(' → ')}</p>
             <p><strong>Total Duration:</strong> ${totalExamDuration} Minutes</p>
-            <p><strong>Marking:</strong> +${marksCorrect} / -${marksIncorrect}</p>
             <p><strong>Test Key:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${code}</span></p>
           </div>
 
