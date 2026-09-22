@@ -1,6 +1,9 @@
 window.Host = {
-  // 1. Upload View (Supports PDF Drag-and-Drop & Direct AI JSON Import / File Upload)
+  editingTestId: null,
+
+  // 1. Upload View
   renderUpload(container) {
+    this.editingTestId = null;
     container.innerHTML = `
       <div class="card" style="max-width: 650px; margin: 20px auto;">
         <h2>Create Exam Paper</h2>
@@ -35,7 +38,7 @@ window.Host = {
           <hr style="position:relative; top:-10px; z-index:-1; border:none; border-top:1px solid var(--border-color);" />
         </div>
 
-        <!-- AI JSON Import (File Upload or Direct Paste) -->
+        <!-- AI JSON Import -->
         <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px;">
           <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:6px;">Upload or Paste AI-Generated JSON</label>
           
@@ -87,7 +90,6 @@ window.Host = {
     };
   },
 
-  // Normalizer: cleans up key differences, arrays vs objects, and answers
   normalizeDraft(raw) {
     const title = raw.title || raw.test_title || raw.exam_title || 'Practice Mock Exam';
     const duration = raw.duration_minutes || raw.duration || 60;
@@ -99,7 +101,6 @@ window.Host = {
       const qText = q.question_text || q.question || q.text || '';
       const section = q.section || q.section_name || 'General';
 
-      // Convert options Object { A: '...', B: '...' } into clean Array [ '...', '...' ]
       let opts = [];
       if (Array.isArray(q.options)) {
         opts = [...q.options];
@@ -111,7 +112,6 @@ window.Host = {
         opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
       }
 
-      // Convert correct answer (letter or numeric) into integer index
       let correctIdx = 0;
       if (typeof q.correct_option_index === 'number') {
         correctIdx = q.correct_option_index;
@@ -188,6 +188,7 @@ window.Host = {
   },
 
   startManualEntry() {
+    this.editingTestId = null;
     window.AppState.parsedExamDraft = {
       title: 'Manual Practice Test',
       duration_minutes: 60,
@@ -207,7 +208,85 @@ window.Host = {
     window.location.hash = '#/host/review';
   },
 
-  // 2. Review & Advanced Sectional Settings View
+  // 2. Fetch Existing Test to Edit
+  async loadTestForEdit(testId) {
+    window.showLoading('Loading Test Details...', 'Fetching questions, sections, and marking rules...');
+    try {
+      const { data: test, error: tErr } = await window.sb
+        .from('tests')
+        .select('*, sections(*)')
+        .eq('id', testId)
+        .single();
+
+      if (tErr || !test) throw new Error('Could not find test record.');
+
+      const { data: questions, error: qErr } = await window.sb
+        .from('questions')
+        .select('*, question_options(*)')
+        .eq('test_id', testId)
+        .order('order_index', { ascending: true });
+
+      if (qErr) throw qErr;
+
+      const secMap = {};
+      (test.sections || []).forEach(s => { secMap[s.id] = s.title; });
+
+      const parsedQuestions = (questions || []).map((q, idx) => {
+        let qText = q.question_text || '';
+        let groupId = null;
+        let sharedContext = '';
+
+        if (qText.startsWith('[SHARED_GROUP:')) {
+          const closeIdx = qText.indexOf(']\n');
+          if (closeIdx !== -1) {
+            const metaStr = qText.substring(14, closeIdx);
+            const parts = metaStr.split('|');
+            groupId = parts[0];
+            sharedContext = parts.slice(1).join('|');
+            qText = qText.substring(closeIdx + 2);
+          }
+        }
+
+        const opts = (q.question_options || [])
+          .sort((a, b) => a.option_index - b.option_index)
+          .map(o => o.option_text);
+
+        while (opts.length < 4) {
+          opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
+        }
+
+        return {
+          num: idx + 1,
+          section: secMap[q.section_id] || 'General',
+          group_id: groupId,
+          shared_context: sharedContext,
+          question_text: qText,
+          options: opts,
+          correct_option_index: q.correct_option_index || 0,
+          explanation: q.explanation || ''
+        };
+      });
+
+      this.editingTestId = testId;
+      window.AppState.parsedExamDraft = {
+        title: test.title,
+        duration_minutes: test.duration_minutes,
+        existingSections: test.sections || [],
+        passing_score_type: test.passing_score_type || 'PERCENT',
+        passing_score: test.passing_score || 35,
+        shuffle_questions: test.shuffle_questions !== false,
+        questions: parsedQuestions
+      };
+
+      window.hideLoading();
+      window.location.hash = '#/host/review';
+    } catch (err) {
+      window.hideLoading();
+      window.showToast('Error loading test: ' + err.message, 'error');
+    }
+  },
+
+  // 3. Review & Sectional Settings View
   renderReview(container) {
     const draft = window.AppState.parsedExamDraft;
     if (!draft || !draft.questions) {
@@ -221,6 +300,12 @@ window.Host = {
       if (!uniqueSecs.includes(secName)) uniqueSecs.push(secName);
     });
 
+    const isEditing = !!this.editingTestId;
+    const existingSecMap = {};
+    if (draft.existingSections) {
+      draft.existingSections.forEach(s => { existingSecMap[s.title] = s; });
+    }
+
     let qHtml = draft.questions.map((q, qIndex) => {
       const isGrouped = !!q.group_id;
       return `
@@ -228,8 +313,7 @@ window.Host = {
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <div>
               <span style="font-weight:700;">Question #${qIndex + 1}</span>
-              <span style="font-size:0.8rem; background:var(--accent-soft); color:var(--primary-accent); padding:2px 6px; border-radius:4px; margin-left:8px;">${q.section || 'General'}</span>
-              ${isGrouped ? `<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:600;">🔗 Linked Group</span>` : ''}
+              <span style="font-size:0.8rem; background:var(--accent-soft); color:var(--primary-accent); padding:2px 6px; border-radius:4px; margin-left:8px;">${q.section \vert{}\vert{} 'General'}</span>${isGrouped ? `<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:600;">🔗 Linked Group</span>` : ''}
             </div>
             <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteQuestion(${qIndex})">Delete</button>
           </div>
@@ -248,16 +332,16 @@ window.Host = {
 
           <div class="form-group">
             <label>Section Name</label>
-            <input type="text" value="${q.section || 'General'}" onchange="Host.updateQSection(${qIndex}, this.value)" />
+            <input type="text" value="${q.section \vert{}\vert{} 'General'}" onchange="Host.updateQSection(${qIndex}, this.value)" />
           </div>
 
           <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Select Correct Answer)</label>
           <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
             ${(q.options || []).map((opt, oIndex) => `
               <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex}, ${oIndex})">
+                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex}, ${oIndex}, this.value)" />
+                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex}, ${oIndex})">✕</button>
               </div>
             `).join('')}
           </div>
@@ -273,8 +357,10 @@ window.Host = {
 
     container.innerHTML = `
       <div style="max-width: 960px; margin: 0 auto;">
-        <h2>Review Questions (${draft.questions.length})</h2>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions and configure sectional time limits below.</p>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h2>${isEditing ? '✏️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>${isEditing ? `<span style="background:#e0f2fe; color:#0369a1; padding:4px 12px; border-radius:14px; font-weight:700; font-size:0.85rem;">Editing Existing Test</span>` : ''}
+        </div>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions, edit text or options, and configure section rules below.</p>
 
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question</button>
@@ -312,26 +398,32 @@ window.Host = {
                   <tbody>
                     ${uniqueSecs.map((sec, sIdx) => {
                       const count = draft.questions.filter(q => (q.section || 'General').trim() === sec).length;
+                      const ex = existingSecMap[sec] || {};
+                      const durVal = ex.duration_minutes || (sIdx === 0 ? 60 : 60);
+                      const cutVal = ex.cutoff_score || 0;
+                      const switchVal = ex.allow_switching ? 'true' : 'false';
+                      const earlyVal = ex.auto_advance !== false ? 'true' : 'false';
+
                       return `
                         <tr style="border-bottom:1px solid var(--border-color);">
                           <td style="padding:10px 8px;"><strong>${sec}</strong></td>
                           <td style="padding:10px 8px;">${count}</td>
                           <td style="padding:10px 8px;">
-                            <input type="number" id="sec-time-${sIdx}" value="${sIdx === 0 ? 60 : 60}" min="1" required style="width:90px;" />
+                            <input type="number" id="sec-time-${sIdx}" value="${durVal}" min="1" required style="width:90px;" />
                           </td>
                           <td style="padding:10px 8px;">
-                            <input type="number" id="sec-cutoff-${sIdx}" value="0" min="0" step="0.5" style="width:80px;" />
+                            <input type="number" id="sec-cutoff-${sIdx}" value="${cutVal}" min="0" step="0.5" style="width:80px;" />
                           </td>
                           <td style="padding:10px 8px;">
                             <select id="sec-switch-${sIdx}" style="width:110px;">
-                              <option value="false" selected>🔒 Locked</option>
-                              <option value="true">🔓 Allowed</option>
+                              <option value="false" ${switchVal === 'false' ? 'selected' : ''}>🔒 Locked</option>
+                              <option value="true" ${switchVal === 'true' ? 'selected' : ''}>🔓 Allowed</option>
                             </select>
                           </td>
                           <td style="padding:10px 8px;">
                             <select id="sec-early-${sIdx}" style="width:120px;">
-                              <option value="true" selected>✅ Enabled</option>
-                              <option value="false">⏳ Wait Timer</option>
+                              <option value="true" ${earlyVal === 'true' ? 'selected' : ''}>✅ Enabled</option>
+                              <option value="false" ${earlyVal === 'false' ? 'selected' : ''}>⏳ Wait Timer</option>
                             </select>
                           </td>
                         </tr>
@@ -362,25 +454,25 @@ window.Host = {
               <div class="form-group">
                 <label>Overall Passing Type</label>
                 <select id="cfg-pass-type">
-                  <option value="PERCENT" selected>Percentage (%)</option>
-                  <option value="MARKS">Absolute Marks</option>
+                  <option value="PERCENT" ${draft.passing_score_type === 'PERCENT' ? 'selected' : ''}>Percentage (%)</option>
+                  <option value="MARKS" ${draft.passing_score_type === 'MARKS' ? 'selected' : ''}>Absolute Marks</option>
                 </select>
               </div>
               <div class="form-group">
                 <label>Overall Passing Threshold</label>
-                <input type="number" step="0.1" id="cfg-pass-score" value="35" required />
+                <input type="number" step="0.1" id="cfg-pass-score" value="${draft.passing_score || 35}" required />
               </div>
             </div>
 
             <div class="form-row" style="margin-top:10px;">
               <label style="display:flex; align-items:center; gap:8px;">
-                <input type="checkbox" id="cfg-shuffle-q" style="width:auto;" checked /> 
+                <input type="checkbox" id="cfg-shuffle-q" style="width:auto;" ${draft.shuffle_questions !== false ? 'checked' : ''} /> 
                 Intra-Section Shuffling (Shuffles questions within each section while keeping linked group questions together)
               </label>
             </div>
 
             <button type="submit" id="publish-submit-btn" class="btn-primary" style="width:100%; margin-top:24px; padding:14px; font-size:1.1rem;">
-              Publish Exam & Generate Test Key
+              ${isEditing ? '💾 Update & Save Exam Changes' : 'Publish Exam & Generate Test Key'}
             </button>
           </form>
         </div>
@@ -428,9 +520,10 @@ window.Host = {
     Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
   },
 
-  // 3. Save to Supabase with Sectional Timing & Linked Group Parameters
+  // 4. Save (Insert OR Update) into Supabase
   async saveAndPublishExam(uniqueSecs) {
     const draft = window.AppState.parsedExamDraft;
+    const isEditing = !!this.editingTestId;
     const title = document.getElementById('cfg-title').value.trim();
     const marksCorrect = parseFloat(document.getElementById('cfg-marks-correct').value);
     const marksIncorrect = parseFloat(document.getElementById('cfg-marks-incorrect').value);
@@ -459,44 +552,84 @@ window.Host = {
       };
     });
 
-    window.showLoading('Publishing Exam...', 'Saving sectional rules, linked question groups, and generating key...');
+    window.showLoading(
+      isEditing ? 'Updating Exam Paper...' : 'Publishing Exam...',
+      'Saving sectional rules, updating questions, and configuring settings...'
+    );
 
     try {
-      const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-      const numbers = '23456789';
+      let testRecord = null;
       let code = '';
-      for (let i = 0; i < 3; i++) code += letters.charAt(Math.floor(Math.random() * letters.length));
-      code += '-';
-      for (let i = 0; i < 4; i++) code += numbers.charAt(Math.floor(Math.random() * numbers.length));
 
-      let pdfUrl = null;
-      if (draft.originalFile) {
-        const filePath = `${code}_${draft.originalFile.name}`;
-        const { error: upErr } = await window.sb.storage
-          .from('exam-pdfs')
-          .upload(filePath, draft.originalFile);
-        if (!upErr) pdfUrl = filePath;
+      if (isEditing) {
+        // Fetch existing test to preserve test key
+        const { data: existingTest, error: getErr } = await window.sb
+          .from('tests')
+          .select('test_key')
+          .eq('id', this.editingTestId)
+          .single();
+
+        if (getErr || !existingTest) throw new Error('Existing test not found.');
+        code = existingTest.test_key;
+
+        // Update Test
+        const { data: updatedTest, error: updateErr } = await window.sb
+          .from('tests')
+          .update({
+            title,
+            duration_minutes: totalExamDuration,
+            has_sections: true,
+            shuffle_questions: shuffleQ,
+            passing_score_type: passType,
+            passing_score: passScore
+          })
+          .eq('id', this.editingTestId)
+          .select()
+          .single();
+
+        if (updateErr) throw new Error(updateErr.message);
+        testRecord = updatedTest;
+
+        // Delete previous questions and sections so updated sets can be inserted cleanly
+        await window.sb.from('questions').delete().eq('test_id', this.editingTestId);
+        await window.sb.from('sections').delete().eq('test_id', this.editingTestId);
+      } else {
+        // Create brand new key
+        const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        const numbers = '23456789';
+        for (let i = 0; i < 3; i++) code += letters.charAt(Math.floor(Math.random() * letters.length));
+        code += '-';
+        for (let i = 0; i < 4; i++) code += numbers.charAt(Math.floor(Math.random() * numbers.length));
+
+        let pdfUrl = null;
+        if (draft.originalFile) {
+          const filePath = `${code}_${draft.originalFile.name}`;
+          const { error: upErr } = await window.sb.storage
+            .from('exam-pdfs')
+            .upload(filePath, draft.originalFile);
+          if (!upErr) pdfUrl = filePath;
+        }
+
+        const { data: newTest, error: insertErr } = await window.sb
+          .from('tests')
+          .insert({
+            test_key: code,
+            title,
+            duration_minutes: totalExamDuration,
+            has_sections: true,
+            shuffle_questions: shuffleQ,
+            shuffle_options: false,
+            passing_score_type: passType,
+            passing_score: passScore,
+            pdf_url: pdfUrl,
+            created_by: window.AppState.user.id
+          })
+          .select()
+          .single();
+
+        if (insertErr) throw new Error(insertErr.message);
+        testRecord = newTest;
       }
-
-      // Insert Test
-      const { data: testRecord, error: testErr } = await window.sb
-        .from('tests')
-        .insert({
-          test_key: code,
-          title,
-          duration_minutes: totalExamDuration,
-          has_sections: true,
-          shuffle_questions: shuffleQ,
-          shuffle_options: false,
-          passing_score_type: passType,
-          passing_score: passScore,
-          pdf_url: pdfUrl,
-          created_by: window.AppState.user.id
-        })
-        .select()
-        .single();
-
-      if (testErr) throw new Error(testErr.message);
 
       // Insert Sections
       const secInsertPayload = sectionsConfig.map(sc => ({
@@ -522,6 +655,7 @@ window.Host = {
       const secMap = {};
       insertedSections.forEach(s => { secMap[s.title] = s.id; });
 
+      // Insert Questions
       for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
         const q = draft.questions[qIdx];
         const secId = secMap[(q.section || 'General').trim()] || insertedSections[0].id;
@@ -554,6 +688,7 @@ window.Host = {
         }
       }
 
+      this.editingTestId = null;
       window.AppState.parsedExamDraft = null;
       window.hideLoading();
 
@@ -561,7 +696,7 @@ window.Host = {
       const portalUrl = `https://mockorbit-cbt.vercel.app`;
       const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
         `📌 *Exam:* ${title}\n` +
-        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}:${s.duration_minutes}m`).join(' | ')})\n` +
+        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}: ${s.duration_minutes}m`).join(' | ')})\n` +
         `🎯 *Marking:* +${marksCorrect} / -${marksIncorrect}\n\n` +
         `🔑 *Test Key:* ${code}\n` +
         `🔗 *Direct Test Link:* ${examUrl}\n\n` +
@@ -570,9 +705,11 @@ window.Host = {
       const targetRoot = document.getElementById('sub-view-root') || document.getElementById('app-root');
       targetRoot.innerHTML = `
         <div class="card" style="max-width:620px; margin:30px auto; text-align:center;">
-          <div style="font-size:2.8rem; margin-bottom:8px;">🎉</div>
-          <h2>Exam Published Successfully!</h2>
-          <p style="color:var(--text-secondary); margin-bottom:20px;">Your sectional exam is live with linked group shuffling enabled.</p>
+          <div style="font-size:2.8rem; margin-bottom:8px;">${isEditing ? '💾' : '🎉'}</div>
+          <h2>${isEditing ? 'Exam Updated Successfully!' : 'Exam Published Successfully!'}</h2>
+          <p style="color:var(--text-secondary); margin-bottom:20px;">
+            ${isEditing ? 'All question edits, section rules, and options have been saved.' : 'Your sectional exam is live. Share the key with candidates:'}
+          </p>
           
           <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
             ${code}
@@ -599,7 +736,7 @@ window.Host = {
       `;
     } catch (err) {
       window.hideLoading();
-      window.showToast('Failed to publish exam: ' + err.message, 'error');
+      window.showToast('Failed to save exam: ' + err.message, 'error');
     }
   },
 
@@ -617,7 +754,7 @@ window.Host = {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   },
 
-  // 4. My Tests List
+  // 5. My Tests List (Includes Edit Button)
   async renderMyTests(container) {
     container.innerHTML = `<div class="card"><p>Loading your exams...</p></div>`;
 
@@ -653,12 +790,13 @@ window.Host = {
           <div>
             <h3 style="margin-bottom:4px;">${t.title}</h3>
             <p style="color:var(--text-secondary); font-size:0.9rem;">
-              Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Sections: ${secSummary} | Attempts: ${attemptCount}
+              Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Sections: ${secSummary} \vert{} Attempts:${attemptCount}
             </p>
           </div>
           <div style="display:flex; gap:8px;">
+            <button class="btn-primary" style="padding:6px 12px; font-size:0.85rem;" onclick="Host.loadTestForEdit('${t.id}')">✏️ Edit</button>
             <button class="btn-outline" onclick="navigator.clipboard.writeText('${t.test_key}'); window.showToast('Copied test key!', 'success');">Copy Key</button>
-            <a href="#/instructions/${t.test_key}"><button class="btn-secondary">Test Preview</button></a>
+            <a href="#/instructions/${t.test_key}"><button class="btn-secondary">Preview</button></a>
             <button class="btn-danger" onclick="Host.deleteTest('${t.id}')">Delete</button>
           </div>
         </div>
@@ -694,7 +832,7 @@ window.Host = {
     });
   },
 
-  // 5. User Access Management
+  // 6. User Access Management
   async renderUserManager(container) {
     container.innerHTML = `<div class="card"><p>Loading user list...</p></div>`;
 
@@ -810,7 +948,7 @@ window.Host = {
     });
   },
 
-  // 6. View All Candidate Attempts
+  // 7. View All Candidate Attempts
   async renderAllHistory(container) {
     container.innerHTML = `<div class="card"><p>Loading all attempt records...</p></div>`;
 
@@ -848,7 +986,7 @@ window.Host = {
                     <div style="font-size:0.82rem; color:var(--text-secondary);">${a.profiles?.email || 'Unknown'}</div>
                   </td>
                   <td style="padding:10px;">${a.tests ? a.tests.title : 'Test'}</td>
-                  <td style="padding:10px; font-weight:600;">${a.total_score} /${a.max_score}</td>
+                  <td style="padding:10px; font-weight:600;">${a.total_score} / ${a.max_score}</td>
                   <td style="padding:10px;">
                     <span style="font-weight:700; color:${a.is_passed ? 'var(--success)' : 'var(--danger)'};">
                       ${a.is_passed ? 'PASS' : 'FAIL'}
