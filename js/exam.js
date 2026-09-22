@@ -13,17 +13,101 @@ window.Exam = {
   attemptId: null,
   isPaused: false,
 
-  renderKeyPrompt(container) {
+  // 1. Dual Mode: Key Prompt + Allocated Folders
+  async renderKeyPrompt(container) {
+    container.innerHTML = `<div class="card" style="text-align:center; padding:30px;"><p>Loading tests and assignments...</p></div>`;
+
+    let allocatedFolders = [];
+    const userId = window.AppState.user?.id;
+
+    if (userId) {
+      try {
+        const { data: allocs } = await window.sb
+          .from('folder_allocations')
+          .select('folder_id, folders(id, name, tests(*, sections(*)))')
+          .eq('user_id', userId);
+
+        if (allocs) {
+          allocatedFolders = allocs
+            .map(a => a.folders)
+            .filter(Boolean);
+        }
+      } catch (e) {
+        console.warn('Error fetching allocated folders:', e);
+      }
+    }
+
+    const hasAllocations = allocatedFolders.length > 0;
+
     container.innerHTML = `
-      <div class="card" style="max-width: 460px; margin: 40px auto; text-align:center;">
-        <h2 style="margin-bottom: 12px;">Enter Test Key</h2>
-        <p style="color:var(--text-secondary); margin-bottom: 24px; font-size:0.95rem;">
-          Enter your test access key to begin.
-        </p>
-        <form id="key-form">
-          <input type="text" id="test-key-input" placeholder="e.g. ABC-4821" required style="font-family:monospace; font-size:1.3rem; text-align:center; text-transform:uppercase; margin-bottom:16px;" />
-          <button type="submit" class="btn-primary" style="width:100%; padding:10px;">Proceed to Instructions</button>
-        </form>
+      <div style="max-width: 900px; margin: 20px auto;">
+        <div style="margin-bottom: 24px;">
+          <h2>Candidate Practice Dashboard</h2>
+          <p style="color:var(--text-secondary); font-size:0.95rem;">
+            Launch practice exams allocated to your account by your exam host, or enter a private test access key.
+          </p>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:24px;">
+          <!-- Manual Key Prompt Card -->
+          <div class="card" style="border-left: 4px solid var(--primary-accent); padding:20px;">
+            <h3 style="margin-bottom: 6px; font-size:1.15rem;">🔑 Enter Test Access Key</h3>
+            <p style="color:var(--text-secondary); font-size:0.88rem; margin-bottom:14px;">
+              Have a test key given by your host? Enter it here:
+            </p>
+            <form id="key-form" style="display:flex; gap:10px; max-width:480px;">
+              <input type="text" id="test-key-input" placeholder="e.g. ABC-4821" required style="font-family:monospace; font-size:1.15rem; text-align:center; text-transform:uppercase; flex:1;" />
+              <button type="submit" class="btn-primary" style="padding:10px 18px; white-space:nowrap;">Go to Test</button>
+            </form>
+          </div>
+
+          <!-- Allocated Folders Section -->
+          <div>
+            <h3 style="margin-bottom: 12px; font-size:1.2rem; display:flex; align-items:center; gap:8px;">
+              <span>📁</span> My Allocated Exam Folders
+            </h3>
+
+            ${!hasAllocations ? `
+              <div class="card" style="text-align:center; padding:32px; background:var(--bg-muted);">
+                <p style="color:var(--text-secondary); margin:0;">
+                  No specific folders have been allocated to your account yet. Use the key box above to launch tests directly.
+                </p>
+              </div>
+            ` : allocatedFolders.map(f => {
+              const tests = f.tests || [];
+              return `
+                <div class="card" style="margin-bottom:16px; border-top: 3px solid #0284c7;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+                    <h4 style="font-size:1.1rem; color:var(--text-main);">📁 ${f.name}</h4>
+                    <span style="font-size:0.8rem; background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:12px; font-weight:600;">
+                      ${tests.length}${tests.length === 1 ? 'Exam' : 'Exams'}
+                    </span>
+                  </div>
+
+                  ${tests.length === 0 ? `
+                    <p style="color:var(--text-secondary); font-size:0.88rem;">No exams have been uploaded into this folder yet.</p>
+                  ` : `
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                      ${tests.map(t => `
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--bg-muted); border-radius:6px; flex-wrap:wrap; gap:10px;">
+                          <div>
+                            <strong>${t.title}</strong>
+                            <div style="font-size:0.82rem; color:var(--text-secondary); margin-top:2px;">
+                              Duration: ${t.duration_minutes} Mins \vert{} Sections:${t.sections?.length || 1}
+                            </div>
+                          </div>
+                          <a href="#/instructions/${t.test_key}">
+                            <button class="btn-primary" style="padding:6px 14px; font-size:0.85rem;">Start Exam ➔</button>
+                          </a>
+                        </div>
+                      `).join('')}
+                    </div>
+                  `}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
       </div>
     `;
 
@@ -147,7 +231,6 @@ window.Exam = {
       this.sections = [{ id: 'default', title: 'General', duration_minutes: test.duration_minutes, allow_switching: true, auto_advance: true }];
     }
 
-    // Unpack shared context headers
     questions.forEach(q => {
       if (q.question_text && q.question_text.startsWith('[SHARED_GROUP:')) {
         const closeIdx = q.question_text.indexOf(']\n');
@@ -161,7 +244,6 @@ window.Exam = {
       }
     });
 
-    // Group by section & shuffle while preserving linked question clusters
     this.questionsBySection = this.sections.map(sec => {
       let secQuestions = questions.filter(q => q.section_id === sec.id);
       if (secQuestions.length === 0 && this.sections.length === 1) secQuestions = [...questions];
@@ -212,7 +294,6 @@ window.Exam = {
     this.startSectionTimer();
   },
 
-  // Shuffles standalone questions and linked question blocks together, preserving internal group order
   shufflePreservingGroups(questions) {
     const blocks = [];
     let currentGroup = null;
@@ -238,7 +319,6 @@ window.Exam = {
     });
     if (currentGroupItems.length > 0) blocks.push(currentGroupItems);
 
-    // Shuffle blocks
     for (let i = blocks.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
@@ -300,7 +380,6 @@ window.Exam = {
 
     container.innerHTML = `
       <div class="exam-layout" style="position:relative;">
-        <!-- Break Overlay -->
         <div id="exam-pause-overlay" style="display:none; position:absolute; inset:0; background:rgba(255, 255, 255, 0.96); backdrop-filter:blur(6px); z-index:999; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px;">
           <div style="font-size:3.5rem; margin-bottom:12px;">☕</div>
           <h2 style="font-size:1.8rem; margin-bottom:8px;">Exam Paused</h2>
@@ -310,7 +389,6 @@ window.Exam = {
           </button>
         </div>
 
-        <!-- Main Column -->
         <div class="exam-main">
           <div class="exam-header">
             <div>
@@ -345,7 +423,6 @@ window.Exam = {
           </div>
         </div>
 
-        <!-- Palette Sidebar -->
         <div class="exam-sidebar">
           <div style="font-weight:700; font-size:0.95rem; margin-bottom:10px; color:var(--primary-accent);">
             Active: ${activeSec.title}
@@ -396,7 +473,6 @@ window.Exam = {
     const target = document.getElementById('question-render-target');
     const selectedOpt = this.answers[q.id];
 
-    // Check for shared passage or instructions
     const sharedBanner = q.shared_context ? `
       <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:var(--radius-sm); padding:14px 16px; margin-bottom:16px; line-height:1.6; font-size:0.95rem; color:#0369a1;">
         <strong style="display:block; margin-bottom:4px; font-size:0.88rem; text-transform:uppercase; letter-spacing:0.5px;">📌 Linked Instruction / Passage</strong>
