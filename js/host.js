@@ -73,7 +73,7 @@ window.Host = {
         });
 
         parsed.originalFile = file;
-        window.AppState.parsedExamDraft = parsed;
+        window.AppState.parsedExamDraft = this.normalizeDraft(parsed);
         window.showToast(`Extracted ${parsed.questions.length} questions across sections!`, 'success');
         window.location.hash = '#/host/review';
       } catch (err) {
@@ -84,6 +84,62 @@ window.Host = {
           window.showToast('Parsing error: ' + err.message, 'error');
         }
       }
+    };
+  },
+
+  // Normalizer: cleans up key differences, arrays vs objects, and answers
+  normalizeDraft(raw) {
+    const title = raw.title || raw.test_title || raw.exam_title || 'Practice Mock Exam';
+    const duration = raw.duration_minutes || raw.duration || 60;
+    const questionsRaw = raw.questions || [];
+
+    const charMap = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, '1': 0, '2': 1, '3': 2, '4': 3 };
+
+    const questions = questionsRaw.map((q, idx) => {
+      const qText = q.question_text || q.question || q.text || '';
+      const section = q.section || q.section_name || 'General';
+
+      // Convert options Object { A: '...', B: '...' } into clean Array [ '...', '...' ]
+      let opts = [];
+      if (Array.isArray(q.options)) {
+        opts = [...q.options];
+      } else if (q.options && typeof q.options === 'object') {
+        const keys = Object.keys(q.options).sort();
+        opts = keys.map(k => String(q.options[k]).trim());
+      }
+      while (opts.length < 4) {
+        opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
+      }
+
+      // Convert correct answer (letter or numeric) into integer index
+      let correctIdx = 0;
+      if (typeof q.correct_option_index === 'number') {
+        correctIdx = q.correct_option_index;
+      } else if (q.correct_answer !== undefined && q.correct_answer !== null) {
+        const ansStr = String(q.correct_answer).trim().toUpperCase();
+        if (charMap[ansStr] !== undefined) {
+          correctIdx = charMap[ansStr];
+        } else if (!isNaN(parseInt(ansStr))) {
+          correctIdx = Math.max(0, parseInt(ansStr) - 1);
+        }
+      }
+
+      return {
+        num: q.question_number || q.num || (idx + 1),
+        section: section.trim(),
+        group_id: q.group_id || null,
+        shared_context: q.shared_context || '',
+        question_text: qText.trim(),
+        options: opts,
+        correct_option_index: correctIdx,
+        explanation: q.explanation || ''
+      };
+    });
+
+    return {
+      title,
+      duration_minutes: duration,
+      questions
     };
   },
 
@@ -101,7 +157,7 @@ window.Host = {
         if (!data.questions || !Array.isArray(data.questions)) {
           throw new Error('Missing "questions" array in JSON');
         }
-        window.AppState.parsedExamDraft = data;
+        window.AppState.parsedExamDraft = this.normalizeDraft(data);
         window.showToast(`Loaded ${data.questions.length} questions successfully!`, 'success');
         window.location.hash = '#/host/review';
       } catch (err) {
@@ -123,7 +179,7 @@ window.Host = {
       if (!data.questions || !Array.isArray(data.questions)) {
         throw new Error('Invalid structure: "questions" array is required.');
       }
-      window.AppState.parsedExamDraft = data;
+      window.AppState.parsedExamDraft = this.normalizeDraft(data);
       window.showToast(`Loaded ${data.questions.length} questions successfully!`, 'success');
       window.location.hash = '#/host/review';
     } catch (e) {
@@ -134,6 +190,7 @@ window.Host = {
   startManualEntry() {
     window.AppState.parsedExamDraft = {
       title: 'Manual Practice Test',
+      duration_minutes: 60,
       questions: [
         {
           num: 1,
@@ -179,7 +236,7 @@ window.Host = {
 
           ${isGrouped ? `
             <div class="form-group" style="background:var(--bg-muted); padding:10px; border-radius:var(--radius-sm); margin-bottom:12px;">
-              <label style="color:var(--text-secondary); font-size:0.8rem; margin-bottom:4px;">Shared Group Context / Passage (Linked across group)</label>
+              <label style="color:var(--text-secondary); font-size:0.8rem; margin-bottom:4px;">Shared Group Context / Passage</label>
               <textarea rows="2" style="font-size:0.88rem;" onchange="Host.updateQGroupContext(${qIndex}, this.value)">${q.shared_context || ''}</textarea>
             </div>
           ` : ''}
@@ -196,11 +253,11 @@ window.Host = {
 
           <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Select Correct Answer)</label>
           <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
-            ${q.options.map((opt, oIndex) => `
+            ${(q.options || []).map((opt, oIndex) => `
               <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex}, ${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex}, ${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex}, ${oIndex})">✕</button>
+                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
+                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
+                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
               </div>
             `).join('')}
           </div>
@@ -217,7 +274,7 @@ window.Host = {
     container.innerHTML = `
       <div style="max-width: 960px; margin: 0 auto;">
         <h2>Review Questions (${draft.questions.length})</h2>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Linked questions share identical statements and will be grouped together during the exam.</p>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions and configure sectional time limits below.</p>
 
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question</button>
@@ -469,7 +526,6 @@ window.Host = {
         const q = draft.questions[qIdx];
         const secId = secMap[(q.section || 'General').trim()] || insertedSections[0].id;
 
-        // If a shared context exists, embed a clean header tag so it can be reconstructed seamlessly
         let formattedQuestionText = q.question_text;
         if (q.shared_context) {
           formattedQuestionText = `[SHARED_GROUP:${q.group_id || 'default'}|${q.shared_context}]\n${q.question_text}`;
