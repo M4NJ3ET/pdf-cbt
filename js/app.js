@@ -129,6 +129,7 @@ async function handleRoute() {
     if (hash === '#/host/upload') wrapInAppShell(root, (el) => Host.renderUpload(el), 'upload');
     else if (hash === '#/host/review') wrapInAppShell(root, (el) => Host.renderReview(el), 'upload');
     else if (hash === '#/host/tests') wrapInAppShell(root, (el) => Host.renderMyTests(el), 'tests');
+    else if (hash === '#/host/folders') wrapInAppShell(root, (el) => Host.renderFolderManager(el), 'folders');
     else if (hash === '#/host/users') wrapInAppShell(root, (el) => Host.renderUserManager(el), 'users');
     else if (hash === '#/host/all-history') wrapInAppShell(root, (el) => Host.renderAllHistory(el), 'all-history');
     return;
@@ -154,7 +155,7 @@ async function handleRoute() {
     return;
   }
 
-  // Active Exam (Full Window)
+  // Active Exam
   if (hash.startsWith('#/exam/')) {
     const testId = hash.replace('#/exam/', '').trim();
     Exam.startTest(root, testId);
@@ -165,7 +166,7 @@ async function handleRoute() {
   root.innerHTML = `
     <div class="card" style="max-width:440px; margin:40px auto; text-align:center;">
       <h2>404 - Not Found</h2>
-      <p style="color:var(--text-secondary); margin:12px 0;">The requested page does not exist.</p>
+      <p style="color:var(--text-secondary); margin-12px 0;">The requested page does not exist.</p>
       <a href="#/hub"><button class="btn-primary">Return to Hub</button></a>
     </div>
   `;
@@ -182,6 +183,9 @@ function wrapInAppShell(root, renderCallback, activeKey) {
     </a>
     <a href="#/host/tests" class="side-link ${activeKey === 'tests' ? 'active' : ''}">
       <span class="icon">📚</span><span class="text">My Tests</span>
+    </a>
+    <a href="#/host/folders" class="side-link ${activeKey === 'folders' ? 'active' : ''}">
+      <span class="icon">📁</span><span class="text">Folders & Allocations</span>
     </a>
     <a href="#/host/all-history" class="side-link ${activeKey === 'all-history' ? 'active' : ''}">
       <span class="icon">📊</span><span class="text">All Attempts</span>
@@ -256,10 +260,10 @@ function renderHostHub(container) {
     <div style="max-width: 1240px; margin: 40px auto; padding: 0 24px;">
       <div style="margin-bottom: 32px;">
         <h1 style="font-size: 2.2rem; margin-bottom: 6px; font-weight:700;">Host Control Hub</h1>
-        <p style="color: var(--text-secondary); font-size:1.05rem;">Manage exams, question papers, candidate attempts, and user authorizations.</p>
+        <p style="color: var(--text-secondary); font-size:1.05rem;">Manage exams, folders, candidate attempts, and user authorizations.</p>
       </div>
 
-      <div class="hub-grid-host">
+      <div class="hub-grid-host" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 20px;">
         <div class="card hub-card" style="border-top: 5px solid #137333;" onclick="window.location.hash='#/host/upload'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">📤</div>
           <h3 style="margin-bottom: 8px;">Upload Test</h3>
@@ -269,7 +273,13 @@ function renderHostHub(container) {
         <div class="card hub-card" style="border-top: 5px solid #1a73e8;" onclick="window.location.hash='#/host/tests'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">📚</div>
           <h3 style="margin-bottom: 8px;">My Tests</h3>
-          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, edit questions, and copy test keys.</p>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, organize into folders, and copy keys.</p>
+        </div>
+
+        <div class="card hub-card" style="border-top: 5px solid #0284c7;" onclick="window.location.hash='#/host/folders'">
+          <div style="font-size: 2.6rem; margin-bottom: 12px;">📁</div>
+          <h3 style="margin-bottom: 8px;">Folders & Access</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Group tests into folders and assign them directly to students.</p>
         </div>
 
         <div class="card hub-card" style="border-top: 5px solid #f2994a;" onclick="window.location.hash='#/host/all-history'">
@@ -281,7 +291,7 @@ function renderHostHub(container) {
         <div class="card hub-card" style="border-top: 5px solid #9b51e0;" onclick="window.location.hash='#/host/users'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">👥</div>
           <h3 style="margin-bottom: 8px;">Manage Users</h3>
-          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Authorize candidate emails and perform administrative password resets.</p>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Authorize candidate emails and perform administrative resets.</p>
         </div>
       </div>
     </div>
@@ -293,14 +303,14 @@ function renderUserHub(container) {
     <div style="max-width: 1100px; margin: 40px auto; padding: 0 24px;">
       <div style="margin-bottom: 32px; text-align:left;">
         <h1 style="font-size: 2.2rem; margin-bottom: 6px; font-weight:700;">Candidate Portal</h1>
-        <p style="color: var(--text-secondary); font-size:1.05rem;">Launch practice tests using your host's test key or review your performance history.</p>
+        <p style="color: var(--text-secondary); font-size:1.05rem;">Access exams allocated to your account or enter a private test key.</p>
       </div>
 
       <div class="hub-grid-user">
         <div class="card hub-card" style="border-top: 5px solid var(--primary-accent);" onclick="window.location.hash='#/take-key'">
           <div style="font-size: 2.8rem; margin-bottom: 12px;">📝</div>
           <h3 style="margin-bottom: 8px;">Take Practice Test</h3>
-          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Enter an exam test key provided by your host to launch your test.</p>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">View your assigned folder exams or enter a private test key.</p>
         </div>
 
         <div class="card hub-card" style="border-top: 5px solid #1a73e8;" onclick="window.location.hash='#/my-history'">
