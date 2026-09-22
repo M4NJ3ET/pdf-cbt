@@ -959,16 +959,34 @@ window.Host = {
 
         window.showLoading('Saving Allocations...', 'Updating student access records...');
 
-        // Clear existing allocations for this folder
-        await window.sb.from('folder_allocations').delete().eq('folder_id', folderId);
+        // 1. Delete previous allocations for this folder
+        const { error: delErr } = await window.sb
+          .from('folder_allocations')
+          .delete()
+          .eq('folder_id', folderId);
 
-        // Insert new selected allocations
+        if (delErr) {
+          window.hideLoading();
+          window.showToast('Failed to clear old allocations: ' + delErr.message, 'error');
+          return;
+        }
+
+        // 2. Insert new allocations if any are selected
         if (selectedUserIds.length > 0) {
           const insertPayload = selectedUserIds.map(uId => ({
             folder_id: folderId,
             user_id: uId
           }));
-          await window.sb.from('folder_allocations').insert(insertPayload);
+
+          const { error: insErr } = await window.sb
+            .from('folder_allocations')
+            .insert(insertPayload);
+
+          if (insErr) {
+            window.hideLoading();
+            window.showToast('Failed to save new allocations: ' + insErr.message, 'error');
+            return;
+          }
         }
 
         window.hideLoading();
