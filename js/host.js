@@ -1,13 +1,14 @@
 window.Host = {
-  // 1. Upload View (Supports PDF Drag-and-Drop & Direct AI JSON Import)
+  // 1. Upload View (Supports PDF Drag-and-Drop & Direct AI JSON Import / File Upload)
   renderUpload(container) {
     container.innerHTML = `
       <div class="card" style="max-width: 650px; margin: 20px auto;">
         <h2>Create Exam Paper</h2>
         <p style="color:var(--text-secondary); margin-bottom: 20px; font-size:0.95rem;">
-          Upload a question paper PDF or paste AI-generated JSON directly.
+          Upload a question paper PDF or import AI-generated JSON directly.
         </p>
 
+        <!-- Dropzone for PDF -->
         <div id="drop-zone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: pointer; background: var(--bg-muted); margin-bottom: 20px;">
           <div style="font-size: 2.2rem; margin-bottom: 8px;">📄</div>
           <p style="font-weight: 600; margin-bottom: 4px;">Click to browse or drop PDF here</p>
@@ -24,19 +25,27 @@ window.Host = {
 
         <div id="scanned-warning" style="display:none; margin-bottom:20px; padding:16px; background: var(--danger-soft); border-radius: var(--radius-sm); border:1px solid var(--danger);">
           <p style="font-weight:600; color:var(--danger);">Scanned or Image-only PDF Detected</p>
-          <p style="font-size:0.9rem; margin-top:4px;">No text layer found. Enter questions manually or paste AI JSON below.</p>
+          <p style="font-size:0.9rem; margin-top:4px;">No text layer found. Enter questions manually or load an AI JSON file below.</p>
           <button class="btn-primary" style="margin-top:10px;" onclick="Host.startManualEntry()">Enter Questions Manually</button>
         </div>
 
+        <!-- Section Divider -->
         <div style="text-align:center; margin-bottom:20px; position:relative;">
           <span style="background:#fff; padding:0 12px; color:var(--text-secondary); font-size:0.85rem; font-weight:600;">OR IMPORT AI JSON</span>
           <hr style="position:relative; top:-10px; z-index:-1; border:none; border-top:1px solid var(--border-color);" />
         </div>
 
+        <!-- AI JSON Import (File Upload or Direct Paste) -->
         <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px;">
-          <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:6px;">Paste AI-Generated JSON</label>
-          <textarea id="json-paste-input" rows="5" placeholder='{"title": "Exam Title", "questions": [...]}' style="font-family:monospace; font-size:0.85rem; width:100%;"></textarea>
-          <button class="btn-primary" style="margin-top:10px; width:100%; padding:10px;" onclick="Host.loadFromJson()">Load AI Exam Paper</button>
+          <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:6px;">Upload or Paste AI-Generated JSON</label>
+          
+          <div style="display:flex; gap:10px; margin-bottom:12px; align-items:center;">
+            <input type="file" id="json-file-input" accept=".json" style="flex:1;" />
+            <button type="button" class="btn-secondary" style="white-space:nowrap; padding:8px 14px;" onclick="Host.loadFromJsonFile()">Load JSON File</button>
+          </div>
+
+          <textarea id="json-paste-input" rows="4" placeholder='{"title": "Exam Title", "questions": [...]}' style="font-family:monospace; font-size:0.85rem; width:100%;"></textarea>
+          <button type="button" class="btn-primary" style="margin-top:10px; width:100%; padding:10px;" onclick="Host.loadFromJson()">Load Pasted JSON</button>
         </div>
       </div>
     `;
@@ -76,6 +85,30 @@ window.Host = {
         }
       }
     };
+  },
+
+  loadFromJsonFile() {
+    const fileInput = document.getElementById('json-file-input');
+    const file = fileInput?.files[0];
+    if (!file) {
+      window.showToast('Please select a .json file first.', 'warning');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!data.questions || !Array.isArray(data.questions)) {
+          throw new Error('Missing "questions" array in JSON');
+        }
+        window.AppState.parsedExamDraft = data;
+        window.showToast(`Loaded ${data.questions.length} questions successfully!`, 'success');
+        window.location.hash = '#/host/review';
+      } catch (err) {
+        window.showToast('JSON Syntax Error: ' + err.message, 'error');
+      }
+    };
+    reader.readAsText(file);
   },
 
   loadFromJson() {
@@ -152,9 +185,9 @@ window.Host = {
           <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
             ${q.options.map((opt, oIndex) => `
               <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex}, ${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex}, ${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex}, ${oIndex})">✕</button>
+                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
+                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
+                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
               </div>
             `).join('')}
           </div>
