@@ -42,7 +42,6 @@ function updateNavigationUI() {
     return;
   }
 
-  // Profile Hover Dropdown Setup
   const role = window.AppState.profile ? window.AppState.profile.role : 'USER';
   const isHost = role === 'HOST';
   const displayName = window.AppState.profile?.full_name || window.AppState.user.email;
@@ -121,6 +120,12 @@ async function handleRoute() {
       return;
     }
 
+    if (hash.startsWith('#/host/edit/')) {
+      const editId = hash.replace('#/host/edit/', '').trim();
+      wrapInAppShell(root, () => Host.loadTestForEdit(editId), 'tests');
+      return;
+    }
+
     if (hash === '#/host/upload') wrapInAppShell(root, (el) => Host.renderUpload(el), 'upload');
     else if (hash === '#/host/review') wrapInAppShell(root, (el) => Host.renderReview(el), 'upload');
     else if (hash === '#/host/tests') wrapInAppShell(root, (el) => Host.renderMyTests(el), 'tests');
@@ -149,7 +154,7 @@ async function handleRoute() {
     return;
   }
 
-  // Active Exam
+  // Active Exam (Full Window)
   if (hash.startsWith('#/exam/')) {
     const testId = hash.replace('#/exam/', '').trim();
     Exam.startTest(root, testId);
@@ -233,7 +238,6 @@ function wrapInAppShell(root, renderCallback, activeKey) {
   renderCallback(subRoot);
 }
 
-// 1. One-Line Host Card Hub
 function renderHostHub(container) {
   container.innerHTML = `
     <div style="max-width: 1240px; margin: 40px auto; padding: 0 24px;">
@@ -246,13 +250,13 @@ function renderHostHub(container) {
         <div class="card hub-card" style="border-top: 5px solid #137333;" onclick="window.location.hash='#/host/upload'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">📤</div>
           <h3 style="margin-bottom: 8px;">Upload Test</h3>
-          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Parse a question paper PDF or compose questions manually.</p>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">Parse a question paper PDF or import AI JSON files.</p>
         </div>
 
         <div class="card hub-card" style="border-top: 5px solid #1a73e8;" onclick="window.location.hash='#/host/tests'">
           <div style="font-size: 2.6rem; margin-bottom: 12px;">📚</div>
           <h3 style="margin-bottom: 8px;">My Tests</h3>
-          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, copy test keys, and preview tests.</p>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5;">View all published exams, edit questions, and copy test keys.</p>
         </div>
 
         <div class="card hub-card" style="border-top: 5px solid #f2994a;" onclick="window.location.hash='#/host/all-history'">
@@ -271,7 +275,6 @@ function renderHostHub(container) {
   `;
 }
 
-// 2. One-Line Candidate Card Hub
 function renderUserHub(container) {
   container.innerHTML = `
     <div style="max-width: 1100px; margin: 40px auto; padding: 0 24px;">
