@@ -387,5 +387,12 @@ window.showModal = function ({ title, bodyHtml, confirmText = 'Confirm', danger 
   `;
 
   document.getElementById('modal-cancel-btn').onclick = () => { container.innerHTML = ''; };
-  document.getElementById('modal-confirm-btn').onclick = () => { container.innerHTML = ''; onConfirm(); };
+  document.getElementById('modal-confirm-btn').onclick = async () => {
+    // Run onConfirm FIRST while elements still exist in DOM
+    try {
+      await onConfirm();
+    } finally {
+      container.innerHTML = '';
+    }
+  };
 };
