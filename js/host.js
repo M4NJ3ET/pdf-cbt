@@ -1,10 +1,17 @@
 window.Host = {
   editingTestId: null,
 
+  getTarget(container) {
+    return container || document.getElementById('sub-view-root') || document.getElementById('app-root');
+  },
+
   // 1. Upload View
   renderUpload(container) {
     this.editingTestId = null;
-    container.innerHTML = `
+    const target = this.getTarget(container);
+    if (!target) return;
+
+    target.innerHTML = `
       <div class="card" style="max-width: 650px; margin: 20px auto;">
         <h2>Create Exam Paper</h2>
         <p style="color:var(--text-secondary); margin-bottom: 20px; font-size:0.95rem;">
@@ -60,34 +67,36 @@ window.Host = {
     const statusLabel = document.getElementById('status-label');
     const scannedWarning = document.getElementById('scanned-warning');
 
-    dropZone.onclick = () => fileInput.click();
+    if (dropZone && fileInput) {
+      dropZone.onclick = () => fileInput.click();
 
-    fileInput.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+      fileInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
 
-      uploadStatus.style.display = 'block';
-      scannedWarning.style.display = 'none';
+        uploadStatus.style.display = 'block';
+        scannedWarning.style.display = 'none';
 
-      try {
-        const parsed = await PdfParser.parseFile(file, (percent) => {
-          progressBar.style.width = percent + '%';
-          statusLabel.innerText = `Parsing sections, linked groups & questions... ${percent}%`;
-        });
+        try {
+          const parsed = await PdfParser.parseFile(file, (percent) => {
+            progressBar.style.width = percent + '%';
+            statusLabel.innerText = `Parsing sections, linked groups & questions... ${percent}%`;
+          });
 
-        parsed.originalFile = file;
-        window.AppState.parsedExamDraft = this.normalizeDraft(parsed);
-        window.showToast(`Extracted ${parsed.questions.length} questions across sections!`, 'success');
-        window.location.hash = '#/host/review';
-      } catch (err) {
-        uploadStatus.style.display = 'none';
-        if (err.message === 'EMPTY_OR_SCANNED_PDF') {
-          scannedWarning.style.display = 'block';
-        } else {
-          window.showToast('Parsing error: ' + err.message, 'error');
+          parsed.originalFile = file;
+          window.AppState.parsedExamDraft = this.normalizeDraft(parsed);
+          window.showToast(`Extracted ${parsed.questions.length} questions across sections!`, 'success');
+          window.location.hash = '#/host/review';
+        } catch (err) {
+          uploadStatus.style.display = 'none';
+          if (err.message === 'EMPTY_OR_SCANNED_PDF') {
+            scannedWarning.style.display = 'block';
+          } else {
+            window.showToast('Parsing error: ' + err.message, 'error');
+          }
         }
-      }
-    };
+      };
+    }
   },
 
   normalizeDraft(raw) {
@@ -288,6 +297,9 @@ window.Host = {
 
   // 3. Review & Sectional Settings View
   renderReview(container) {
+    const target = this.getTarget(container);
+    if (!target) return;
+
     const draft = window.AppState.parsedExamDraft;
     if (!draft || !draft.questions) {
       window.location.hash = '#/host/upload';
@@ -313,7 +325,8 @@ window.Host = {
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <div>
               <span style="font-weight:700;">Question #${qIndex + 1}</span>
-              <span style="font-size:0.8rem; background:var(--accent-soft); color:var(--primary-accent); padding:2px 6px; border-radius:4px; margin-left:8px;">${q.section \vert{}\vert{} 'General'}</span>${isGrouped ? `<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:600;">🔗 Linked Group</span>` : ''}
+              <span style="font-size:0.8rem; background:var(--accent-soft); color:var(--primary-accent); padding:2px 6px; border-radius:4px; margin-left:8px;">${q.section || 'General'}</span>
+              ${isGrouped ? `<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:600;">🔗 Linked Group</span>` : ''}
             </div>
             <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteQuestion(${qIndex})">Delete</button>
           </div>
@@ -332,16 +345,16 @@ window.Host = {
 
           <div class="form-group">
             <label>Section Name</label>
-            <input type="text" value="${q.section \vert{}\vert{} 'General'}" onchange="Host.updateQSection(${qIndex}, this.value)" />
+            <input type="text" value="${q.section || 'General'}" onchange="Host.updateQSection(${qIndex}, this.value)" />
           </div>
 
           <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Select Correct Answer)</label>
           <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
             ${(q.options || []).map((opt, oIndex) => `
               <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex}, ${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex}, ${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex}, ${oIndex})">✕</button>
+                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
+                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
+                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
               </div>
             `).join('')}
           </div>
@@ -355,10 +368,11 @@ window.Host = {
       `;
     }).join('');
 
-    container.innerHTML = `
+    target.innerHTML = `
       <div style="max-width: 960px; margin: 0 auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h2>${isEditing ? '✏️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>${isEditing ? `<span style="background:#e0f2fe; color:#0369a1; padding:4px 12px; border-radius:14px; font-weight:700; font-size:0.85rem;">Editing Existing Test</span>` : ''}
+          <h2>${isEditing ? '✏️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>
+          ${isEditing ? `<span style="background:#e0f2fe; color:#0369a1; padding:4px 12px; border-radius:14px; font-weight:700; font-size:0.85rem;">Editing Existing Test</span>` : ''}
         </div>
         <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions, edit text or options, and configure section rules below.</p>
 
@@ -488,7 +502,7 @@ window.Host = {
   updateQText(idx, val) { window.AppState.parsedExamDraft.questions[idx].question_text = val; },
   updateQSection(idx, val) {
     window.AppState.parsedExamDraft.questions[idx].section = val;
-    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+    Host.renderReview();
   },
   updateQGroupContext(idx, val) { window.AppState.parsedExamDraft.questions[idx].shared_context = val; },
   setCorrectOption(qIdx, oIdx) { window.AppState.parsedExamDraft.questions[qIdx].correct_option_index = oIdx; },
@@ -496,15 +510,15 @@ window.Host = {
   updateExplanation(idx, val) { window.AppState.parsedExamDraft.questions[idx].explanation = val; },
   deleteQuestion(idx) {
     window.AppState.parsedExamDraft.questions.splice(idx, 1);
-    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+    Host.renderReview();
   },
   addOption(qIdx) {
     window.AppState.parsedExamDraft.questions[qIdx].options.push('New Option');
-    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+    Host.renderReview();
   },
   removeOption(qIdx, oIdx) {
     window.AppState.parsedExamDraft.questions[qIdx].options.splice(oIdx, 1);
-    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+    Host.renderReview();
   },
   addQuestionManually() {
     window.AppState.parsedExamDraft.questions.push({
@@ -517,10 +531,10 @@ window.Host = {
       correct_option_index: 0,
       explanation: ''
     });
-    Host.renderReview(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+    Host.renderReview();
   },
 
-  // 4. Save (Insert OR Update) into Supabase
+  // 4. Save into Supabase
   async saveAndPublishExam(uniqueSecs) {
     const draft = window.AppState.parsedExamDraft;
     const isEditing = !!this.editingTestId;
@@ -562,7 +576,6 @@ window.Host = {
       let code = '';
 
       if (isEditing) {
-        // Fetch existing test to preserve test key
         const { data: existingTest, error: getErr } = await window.sb
           .from('tests')
           .select('test_key')
@@ -572,7 +585,6 @@ window.Host = {
         if (getErr || !existingTest) throw new Error('Existing test not found.');
         code = existingTest.test_key;
 
-        // Update Test
         const { data: updatedTest, error: updateErr } = await window.sb
           .from('tests')
           .update({
@@ -590,11 +602,9 @@ window.Host = {
         if (updateErr) throw new Error(updateErr.message);
         testRecord = updatedTest;
 
-        // Delete previous questions and sections so updated sets can be inserted cleanly
         await window.sb.from('questions').delete().eq('test_id', this.editingTestId);
         await window.sb.from('sections').delete().eq('test_id', this.editingTestId);
       } else {
-        // Create brand new key
         const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
         const numbers = '23456789';
         for (let i = 0; i < 3; i++) code += letters.charAt(Math.floor(Math.random() * letters.length));
@@ -696,13 +706,13 @@ window.Host = {
       const portalUrl = `https://mockorbit-cbt.vercel.app`;
       const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
         `📌 *Exam:* ${title}\n` +
-        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}: ${s.duration_minutes}m`).join(' | ')})\n` +
+        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}:${s.duration_minutes}m`).join(' | ')})\n` +
         `🎯 *Marking:* +${marksCorrect} / -${marksIncorrect}\n\n` +
         `🔑 *Test Key:* ${code}\n` +
         `🔗 *Direct Test Link:* ${examUrl}\n\n` +
         `Login and enter the key at: ${portalUrl}`;
 
-      const targetRoot = document.getElementById('sub-view-root') || document.getElementById('app-root');
+      const targetRoot = this.getTarget();
       targetRoot.innerHTML = `
         <div class="card" style="max-width:620px; margin:30px auto; text-align:center;">
           <div style="font-size:2.8rem; margin-bottom:8px;">${isEditing ? '💾' : '🎉'}</div>
@@ -754,9 +764,12 @@ window.Host = {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   },
 
-  // 5. My Tests List (Includes Edit Button)
+  // 5. My Tests List
   async renderMyTests(container) {
-    container.innerHTML = `<div class="card"><p>Loading your exams...</p></div>`;
+    const target = this.getTarget(container);
+    if (!target) return;
+
+    target.innerHTML = `<div class="card"><p>Loading your exams...</p></div>`;
 
     const { data: tests, error } = await window.sb
       .from('tests')
@@ -764,12 +777,12 @@ window.Host = {
       .order('created_at', { ascending: false });
 
     if (error) {
-      container.innerHTML = `<div class="card"><p>Error: ${error.message}</p></div>`;
+      target.innerHTML = `<div class="card"><p>Error: ${error.message}</p></div>`;
       return;
     }
 
     if (!tests || tests.length === 0) {
-      container.innerHTML = `
+      target.innerHTML = `
         <div class="card" style="text-align:center; padding:40px;">
           <h3>No Tests Uploaded Yet</h3>
           <p style="color:var(--text-secondary); margin:12px 0;">Upload your first exam paper to get started.</p>
@@ -790,7 +803,7 @@ window.Host = {
           <div>
             <h3 style="margin-bottom:4px;">${t.title}</h3>
             <p style="color:var(--text-secondary); font-size:0.9rem;">
-              Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Sections: ${secSummary} \vert{} Attempts:${attemptCount}
+              Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Sections: ${secSummary} | Attempts: ${attemptCount}
             </p>
           </div>
           <div style="display:flex; gap:8px;">
@@ -803,7 +816,7 @@ window.Host = {
       `;
     }).join('');
 
-    container.innerHTML = `
+    target.innerHTML = `
       <div style="max-width:1000px; margin:0 auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
           <h2>My Uploaded Tests</h2>
@@ -826,7 +839,7 @@ window.Host = {
           window.showToast(error.message, 'error');
         } else {
           window.showToast('Test deleted successfully.', 'success');
-          Host.renderMyTests(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+          Host.renderMyTests();
         }
       }
     });
@@ -834,7 +847,10 @@ window.Host = {
 
   // 6. User Access Management
   async renderUserManager(container) {
-    container.innerHTML = `<div class="card"><p>Loading user list...</p></div>`;
+    const target = this.getTarget(container);
+    if (!target) return;
+
+    target.innerHTML = `<div class="card"><p>Loading user list...</p></div>`;
 
     const [authRes, profRes] = await Promise.all([
       window.sb.from('authorized_emails').select('*').order('created_at', { ascending: false }),
@@ -843,7 +859,7 @@ window.Host = {
 
     const profiles = profRes.data || [];
 
-    container.innerHTML = `
+    target.innerHTML = `
       <div style="max-width:900px; margin:0 auto;">
         <h2>User Access Management</h2>
         
@@ -902,7 +918,7 @@ window.Host = {
         window.showToast(error.message, 'error');
       } else {
         window.showToast(`Authorized ${email} successfully.`, 'success');
-        Host.renderUserManager(container);
+        Host.renderUserManager();
       }
     };
   },
@@ -942,7 +958,7 @@ window.Host = {
           window.showToast(error.message, 'error');
         } else {
           window.showToast('User removed.', 'success');
-          Host.renderUserManager(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+          Host.renderUserManager();
         }
       }
     });
@@ -950,7 +966,10 @@ window.Host = {
 
   // 7. View All Candidate Attempts
   async renderAllHistory(container) {
-    container.innerHTML = `<div class="card"><p>Loading all attempt records...</p></div>`;
+    const target = this.getTarget(container);
+    if (!target) return;
+
+    target.innerHTML = `<div class="card"><p>Loading all attempt records...</p></div>`;
 
     const { data: attempts, error } = await window.sb
       .from('attempts')
@@ -959,11 +978,11 @@ window.Host = {
       .order('submitted_at', { ascending: false });
 
     if (error) {
-      container.innerHTML = `<div class="card"><p>Error: ${error.message}</p></div>`;
+      target.innerHTML = `<div class="card"><p>Error: ${error.message}</p></div>`;
       return;
     }
 
-    container.innerHTML = `
+    target.innerHTML = `
       <div style="max-width:1100px; margin:0 auto;">
         <h2>All Candidate Attempts (${attempts.length})</h2>
         <div class="card" style="margin-top:20px; overflow-x:auto;">
@@ -986,7 +1005,7 @@ window.Host = {
                     <div style="font-size:0.82rem; color:var(--text-secondary);">${a.profiles?.email || 'Unknown'}</div>
                   </td>
                   <td style="padding:10px;">${a.tests ? a.tests.title : 'Test'}</td>
-                  <td style="padding:10px; font-weight:600;">${a.total_score} / ${a.max_score}</td>
+                  <td style="padding:10px; font-weight:600;">${a.total_score} /${a.max_score}</td>
                   <td style="padding:10px;">
                     <span style="font-weight:700; color:${a.is_passed ? 'var(--success)' : 'var(--danger)'};">
                       ${a.is_passed ? 'PASS' : 'FAIL'}
@@ -1018,7 +1037,7 @@ window.Host = {
           window.showToast(error.message, 'error');
         } else {
           window.showToast('Attempt record deleted.', 'success');
-          Host.renderAllHistory(document.getElementById('sub-view-root') || document.getElementById('app-root'));
+          Host.renderAllHistory();
         }
       }
     });
