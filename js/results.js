@@ -1,5 +1,4 @@
 window.Results = {
-  // 1. Candidate's History
   async renderMyHistory(container) {
     container.innerHTML = `
       <div class="card" style="text-align:center; padding:30px;">
@@ -83,7 +82,6 @@ window.Results = {
     }
   },
 
-  // 2. Scorecard with Sectional Breakdown & Question Type Analysis
   async renderResult(container, attemptId) {
     container.innerHTML = `
       <div class="card" style="text-align:center; padding:30px;">
@@ -148,6 +146,8 @@ window.Results = {
             correctAnsDisplay = correctOpt ? `(${String.fromCharCode(65 + correctOpt.option_index)}) ${correctOpt.option_text}` : 'N/A';
           }
 
+          const qImgHtml = q.image_url ? `<div style="margin:10px 0;"><img src="${q.image_url}" style="max-height:160px; border-radius:4px;" /></div>` : '';
+
           let badge = '';
           if (ans.selected_option_index === null || ans.selected_option_index === undefined) {
             badge = `<span style="background:#f1f3f4; color:#5f6368; padding:2px 8px; border-radius:4px; font-size:0.8rem; font-weight:600;">UNATTEMPTED (0.0)</span>`;
@@ -164,6 +164,7 @@ window.Results = {
                 <div>${badge}</div>
               </div>
               <p style="margin-bottom:8px;">${q.question_text}</p>
+              ${qImgHtml}
               <div style="font-size:0.9rem; line-height:1.6; background:var(--bg-muted); padding:10px 12px; border-radius:6px;">
                 <p>Your Answer: <strong>${userAnsDisplay}</strong></p>
                 <p>Correct Answer: <strong style="color:var(--success);">${correctAnsDisplay}</strong></p>
