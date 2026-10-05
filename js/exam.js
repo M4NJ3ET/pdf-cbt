@@ -174,7 +174,6 @@ window.Exam = {
             <thead>
               <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary); text-align:left;">
                 <th style="padding:6px;">Section</th>
-                <th style="padding:6px;">Questions</th>
                 <th style="padding:6px;">Correct (+Marks)</th>
                 <th style="padding:6px;">Incorrect (-Marks)</th>
                 <th style="padding:6px;">Navigation</th>
@@ -184,7 +183,6 @@ window.Exam = {
               ${sortedSections.map(s => `
                 <tr style="border-bottom:1px solid var(--border-color);">
                   <td style="padding:8px 6px;"><strong>${s.title}</strong></td>
-                  <td style="padding:8px 6px;">${test.questions?.filter(q => q.section_id === s.id).length || '—'}</td>
                   <td style="padding:8px 6px; color:var(--success); font-weight:600;">+${s.marks_correct ?? 1.0}</td>
                   <td style="padding:8px 6px; color:var(--danger); font-weight:600;">-${s.marks_incorrect ?? 0.33}</td>
                   <td style="padding:8px 6px;">${s.allow_switching ? '🔓 Free Navigation' : '🔒 Locked'}</td>
@@ -236,7 +234,6 @@ window.Exam = {
       this.sections = [{ id: 'default', title: 'General', duration_minutes: test.duration_minutes, allow_switching: true, auto_advance: true }];
     }
 
-    // Check if all sections allow free switching (Global Mode)
     this.isGlobalTimer = this.sections.every(s => s.allow_switching === true);
 
     questions.forEach(q => {
@@ -471,6 +468,7 @@ window.Exam = {
     const target = document.getElementById('question-render-target');
     const userAns = this.answers[q.id];
     const qType = q.question_type || 'MCQ';
+    const activeSec = this.sections[this.currentSectionIndex];
 
     const sharedBanner = q.shared_context ? `
       <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:var(--radius-sm); padding:14px 16px; margin-bottom:16px; line-height:1.6; font-size:0.95rem; color:#0369a1;">
@@ -478,6 +476,18 @@ window.Exam = {
         ${q.shared_context}
       </div>
     ` : '';
+
+    const sectionInfoBanner = `
+      <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; font-size:0.9rem;">
+        <div>
+          📁 <strong>Section:</strong> ${activeSec.title} &nbsp;|&nbsp; 
+          📝 <strong>Questions:</strong> ${activeQuestions.length}
+        </div>
+        <div style="color:var(--text-secondary);">
+          🎯 <strong>Marking:</strong> <span style="color:var(--success);">+${activeSec.marks_correct ?? 1.0}</span> / <span style="color:var(--danger);">-${activeSec.marks_incorrect ?? 0.33}</span>
+        </div>
+      </div>
+    `;
 
     let inputAreaHtml = '';
     if (qType === 'NAT') {
@@ -524,8 +534,9 @@ window.Exam = {
 
     target.innerHTML = `
       <div style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:8px;">
-        ${this.sections[this.currentSectionIndex].title} — Question ${this.currentQuestionIndex + 1} of ${activeQuestions.length} (${qType})
+        Question ${this.currentQuestionIndex + 1} of ${activeQuestions.length} (${qType})
       </div>
+      ${sectionInfoBanner}
       ${sharedBanner}
       <div class="exam-question-text">${q.question_text}</div>
       ${inputAreaHtml}
@@ -838,7 +849,7 @@ window.Exam = {
         });
       } else {
         incorrectCount++;
-        const appliedNeg = marksIncorrect; // Respects 0.0 negative marking if host set it to 0
+        const appliedNeg = marksIncorrect;
         totalScore -= appliedNeg;
         answerInserts.push({
           attempt_id: this.attemptId,
