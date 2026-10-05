@@ -90,7 +90,6 @@ async function handleRoute() {
   const isAuth = !!window.AppState.user;
   const isHost = window.AppState.profile && window.AppState.profile.role === 'HOST';
 
-  // Public / Auth Views
   if (!isAuth) {
     if (hash === '#/' || hash === '') { renderPublicLanding(root); return; }
     if (hash === '#/login') { Auth.renderLogin(root); return; }
@@ -99,20 +98,17 @@ async function handleRoute() {
     return;
   }
 
-  // Home Hub
   if (hash === '#/' || hash === '' || hash === '#/hub' || hash === '#/host/dashboard') {
     if (isHost) renderHostHub(root);
     else renderUserHub(root);
     return;
   }
 
-  // Settings
   if (hash === '#/settings' || hash === '#/change-password') {
     wrapInAppShell(root, (el) => Auth.renderSettings(el), 'settings');
     return;
   }
 
-  // Host Sidebar Views
   if (hash.startsWith('#/host/')) {
     if (!isHost) {
       window.showToast('Host authorization required.', 'error');
@@ -135,7 +131,6 @@ async function handleRoute() {
     return;
   }
 
-  // Candidate Sidebar Views
   if (hash === '#/take-key') {
     wrapInAppShell(root, (el) => Exam.renderKeyPrompt(el), 'take');
     return;
@@ -155,24 +150,21 @@ async function handleRoute() {
     return;
   }
 
-  // Active Exam
   if (hash.startsWith('#/exam/')) {
     const testId = hash.replace('#/exam/', '').trim();
     Exam.startTest(root, testId);
     return;
   }
 
-  // 404
   root.innerHTML = `
     <div class="card" style="max-width:440px; margin:40px auto; text-align:center;">
       <h2>404 - Not Found</h2>
-      <p style="color:var(--text-secondary); margin-12px 0;">The requested page does not exist.</p>
+      <p style="color:var(--text-secondary); margin:12px 0;">The requested page does not exist.</p>
       <a href="#/hub"><button class="btn-primary">Return to Hub</button></a>
     </div>
   `;
 }
 
-// Collapsible Sidebar Wrapper
 function wrapInAppShell(root, renderCallback, activeKey) {
   const isHost = window.AppState.profile && window.AppState.profile.role === 'HOST';
 
@@ -388,7 +380,6 @@ window.showModal = function ({ title, bodyHtml, confirmText = 'Confirm', danger 
 
   document.getElementById('modal-cancel-btn').onclick = () => { container.innerHTML = ''; };
   document.getElementById('modal-confirm-btn').onclick = async () => {
-    // Run onConfirm FIRST while elements still exist in DOM
     try {
       await onConfirm();
     } finally {
