@@ -92,7 +92,7 @@ window.Exam = {
                           <div>
                             <strong>${t.title}</strong>
                             <div style="font-size:0.82rem; color:var(--text-secondary); margin-top:2px;">
-                              Duration: ${t.duration_minutes} Mins | Sections: ${t.sections?.length || 1}
+                              Duration: ${t.duration_minutes} Mins \vert{} Sections:${t.sections?.length || 1}
                             </div>
                           </div>
                           <a href="#/instructions/${t.test_key}">
@@ -394,7 +394,7 @@ window.Exam = {
           <h2 style="font-size:1.8rem; margin-bottom:8px;">Exam Paused</h2>
           <p style="color:var(--text-secondary); max-width:440px; margin-bottom:24px;">The timer has stopped and question content is hidden.</p>
           <button class="btn-primary" style="padding:14px 32px; font-size:1.1rem;" onclick="Exam.resumeTest()">
-            ▶️ Resume Test
+            ▶️️ Resume Test
           </button>
         </div>
 
@@ -407,7 +407,6 @@ window.Exam = {
             <div style="display:flex; align-items:center; gap:12px;">
               <button class="btn-secondary" style="padding:6px 10px; font-size:0.85rem;" onclick="Exam.pauseTest()">☕ Break</button>
               <button class="btn-outline" style="padding:6px 10px; font-size:0.85rem;" onclick="Exam.saveForLater()">💾 Save for Later</button>
-              <!-- Feature 3: Grand Total Time shown on top right -->
               <div style="text-align:right;">
                 <div style="font-size:0.72rem; color:var(--text-secondary); font-weight:600;">Total Time</div>
                 <div id="global-exam-timer" class="timer-box">00:00:00</div>
@@ -486,7 +485,13 @@ window.Exam = {
       </div>
     ` : '';
 
-    // Feature 3: Section timer shown to the left of "🎯 Marking"
+    // Calculate initial remaining time for the section badge to prevent flashing 00:00:00
+    const secRem = (!this.isGlobalTimer && activeSec) ? (this.sectionTimeRemaining[activeSec.id] || 0) : 0;
+    const shrs = Math.floor(secRem / 3600);
+    const smins = Math.floor((secRem % 3600) / 60);
+    const ssecs = secRem % 60;
+    const initialSecTimeFormatted = `${String(shrs).padStart(2, '0')}:${String(smins).padStart(2, '0')}:${String(ssecs).padStart(2, '0')}`;
+
     const sectionInfoBanner = `
       <div style="background:#f8fafc; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; font-size:0.9rem;">
         <div>
@@ -496,7 +501,7 @@ window.Exam = {
         <div style="display:flex; align-items:center; gap:16px;">
           ${!this.isGlobalTimer ? `
             <div style="font-weight:600; color:var(--warning); display:flex; align-items:center; gap:6px;">
-              <span>⏳ Section Time:</span> <span id="section-timer-badge" class="timer-box" style="padding:2px 8px; font-size:0.9rem;">00:00:00</span>
+              <span>⏳ Section Time:</span> <span id="section-timer-badge" class="timer-box" style="padding:2px 8px; font-size:0.9rem;">${initialSecTimeFormatted}</span>
             </div>
           ` : ''}
           <div style="color:var(--text-secondary);">
@@ -528,8 +533,7 @@ window.Exam = {
                 <input type="checkbox" ${isChecked ? 'checked' : ''} style="width:18px; height:18px; pointer-events:none;" />
                 <div class="option-badge">${String.fromCharCode(65 + opt.option_index)}</div>
                 <div style="flex:1;">
-                  <div>${opt.option_text}</div>
-                  ${optImg ? `<img src="${optImg}" alt="Option Image" style="max-height:80px; margin-top:6px; border-radius:4px;" />` : ''}
+                  <div>${opt.option_text}</div>${optImg ? `<img src="${optImg}" alt="Option Image" style="max-height:80px; margin-top:6px; border-radius:4px;" />` : ''}
                 </div>
               </div>
             `;
@@ -547,8 +551,7 @@ window.Exam = {
               <div class="option-item ${isSelected ? 'selected' : ''}" onclick="Exam.selectOption(${opt.option_index})">
                 <div class="option-badge">${String.fromCharCode(65 + opt.option_index)}</div>
                 <div style="flex:1;">
-                  <div>${opt.option_text}</div>
-                  ${optImg ? `<img src="${optImg}" alt="Option Image" style="max-height:80px; margin-top:6px; border-radius:4px;" />` : ''}
+                  <div>${opt.option_text}</div>${optImg ? `<img src="${optImg}" alt="Option Image" style="max-height:80px; margin-top:6px; border-radius:4px;" />` : ''}
                 </div>
               </div>
             `;
@@ -603,7 +606,7 @@ window.Exam = {
   setNatAnswer(qId, val) {
     if (this.isPaused) return;
     if (val === '' || val === null) {
-      delete this.answers[qId];
+      delete this.answers[q.id];
     } else {
       this.answers[qId] = parseFloat(val);
     }
@@ -721,7 +724,6 @@ window.Exam = {
     this.timerInterval = setInterval(() => {
       if (this.isPaused) return;
 
-      // 1. Global / Grand Total Timer
       this.globalTimeRemaining--;
       this.saveLocalProgress();
 
@@ -739,7 +741,6 @@ window.Exam = {
         globalTimerElem.innerText = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
       }
 
-      // 2. Sectional Timer with strict Enforcement & Auto-Navigation (Feature 4)
       if (!this.isGlobalTimer) {
         const activeSec = this.sections[this.currentSectionIndex];
         if (activeSec && this.sectionTimeRemaining[activeSec.id] !== undefined) {
@@ -761,7 +762,6 @@ window.Exam = {
             }
           }
 
-          // If sectional time expires (reaches 0), automatically advance candidate to the next section or submit
           if (secRem <= 0) {
             window.showToast(`Time expired for ${activeSec.title}! Moving to next section.`, 'warning');
             if (this.currentSectionIndex < this.sections.length - 1) {
@@ -895,7 +895,7 @@ window.Exam = {
           question_id: q.id,
           selected_option_index: Array.isArray(userAns) ? userAns[0] : userAns,
           is_correct: false,
-          marks_awarded: -appliedNeg
+          marks_awarded: -appliedNotFound || -appliedNeg
         });
       }
     });
@@ -931,7 +931,7 @@ window.Exam = {
           <div style="font-size:3rem; margin-bottom:12px;">✅</div>
           <h2>Exam Submitted Successfully</h2>
           <p style="color:var(--text-secondary); margin-bottom:24px;">All sections have been evaluated.</p>
-          <a href="#/results/${this.attemptId}"><button class="btn-primary" style="width:100%; padding:12px; font-size:1.1rem;">View Full Scorecard</button></a>
+          <a href="#/results/${this.attemptId}"><button class="btn-primary" style="width:100%; padding:12px; font-size:1.1rem;">View Full Scorecard, View Full Scorecard</button></a>
         </div>
       `;
     } catch (err) {
