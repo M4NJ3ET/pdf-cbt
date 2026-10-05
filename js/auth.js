@@ -174,7 +174,6 @@ window.Auth = {
           return;
         }
 
-        // Save full name to profile
         if (data.user) {
           await window.sb
             .from('profiles')
@@ -202,7 +201,6 @@ window.Auth = {
           Update your profile details and password.
         </p>
 
-        <!-- Edit Profile Name Card -->
         <div class="card" style="margin-bottom: 24px;">
           <h3 style="margin-bottom: 14px;">Personal Information</h3>
           <form id="edit-profile-form">
@@ -220,7 +218,6 @@ window.Auth = {
           </form>
         </div>
 
-        <!-- Change Password Card -->
         <div class="card">
           <h3 style="margin-bottom: 14px;">Change Password</h3>
           <form id="change-pwd-form">
@@ -235,7 +232,6 @@ window.Auth = {
       </div>
     `;
 
-    // Save Name handler
     document.getElementById('edit-profile-form').onsubmit = async (e) => {
       e.preventDefault();
       const updatedName = document.getElementById('profile-name').value.trim();
@@ -260,7 +256,6 @@ window.Auth = {
       btn.innerText = 'Save Name';
     };
 
-    // Change Password handler
     document.getElementById('change-pwd-form').onsubmit = async (e) => {
       e.preventDefault();
       const newPassword = document.getElementById('new-password').value;
