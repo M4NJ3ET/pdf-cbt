@@ -169,8 +169,9 @@ window.Exam = {
               <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary); text-align:left;">
                 <th style="padding:6px;">Section</th>
                 <th style="padding:6px;">Time Limit</th>
-                <th style="padding:6px;">Cutoff Score</th>
-                <th style="padding:6px;">Navigation Rule</th>
+                <th style="padding:6px;">Correct (+Marks)</th>
+                <th style="padding:6px;">Incorrect (-Marks)</th>
+                <th style="padding:6px;">Cutoff</th>
               </tr>
             </thead>
             <tbody>
@@ -178,14 +179,15 @@ window.Exam = {
                 <tr style="border-bottom:1px solid var(--border-color);">
                   <td style="padding:8px 6px;"><strong>${s.title}</strong></td>
                   <td style="padding:8px 6px;">${s.duration_minutes || test.duration_minutes} Mins</td>
+                  <td style="padding:8px 6px; color:var(--success); font-weight:600;">+${s.marks_correct ?? 1.0}</td>
+                  <td style="padding:8px 6px; color:var(--danger); font-weight:600;">-${s.marks_incorrect ?? 0.33}</td>
                   <td style="padding:8px 6px;">${s.cutoff_score > 0 ? `${s.cutoff_score} Marks` : 'None'}</td>
-                  <td style="padding:8px 6px;">${s.allow_switching ? 'Free Navigation' : '🔒 Locked (Must complete in order)'}</td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
           <p style="font-size:0.85rem; color:var(--text-secondary);">
-            <strong>Marking Scheme:</strong> +${sortedSections[0]?.marks_correct || 1.0} for correct, -${sortedSections[0]?.marks_incorrect || 0.25} for wrong.
+            Supports MCQ (Single), MSQ (Multiple), and NAT (Numeric Answer) question types.
           </p>
         </div>
 
@@ -471,7 +473,8 @@ window.Exam = {
     const q = activeQuestions[this.currentQuestionIndex];
     this.visited[q.id] = true;
     const target = document.getElementById('question-render-target');
-    const selectedOpt = this.answers[q.id];
+    const userAns = this.answers[q.id];
+    const qType = q.question_type || 'MCQ';
 
     const sharedBanner = q.shared_context ? `
       <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:var(--radius-sm); padding:14px 16px; margin-bottom:16px; line-height:1.6; font-size:0.95rem; color:#0369a1;">
@@ -480,20 +483,56 @@ window.Exam = {
       </div>
     ` : '';
 
+    let inputAreaHtml = '';
+    if (qType === 'NAT') {
+      const val = userAns !== undefined && userAns !== null ? userAns : '';
+      inputAreaHtml = `
+        <div style="margin-top:16px;">
+          <label style="font-weight:600; display:block; margin-bottom:8px; color:var(--text-main);">Enter Numeric Answer:</label>
+          <input type="number" step="any" id="nat-input-${q.id}" value="${val}" placeholder="Type your answer here..." onchange="Exam.setNatAnswer('${q.id}', this.value)" style="max-width:300px; padding:10px; font-size:1.1rem;" />
+        </div>
+      `;
+    } else if (qType === 'MSQ') {
+      const selectedSet = Array.isArray(userAns) ? userAns : [];
+      inputAreaHtml = `
+        <div style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:8px;">[Multiple Select Question - Choose all correct options]</div>
+        <div class="options-list">
+          ${(q.question_options || []).map(opt => {
+            const isChecked = selectedSet.includes(opt.option_index);
+            return `
+              <div class="option-item ${isChecked ? 'selected' : ''}" onclick="Exam.toggleMsqOption('${q.id}',${opt.option_index})">
+                <input type="checkbox" ${isChecked ? 'checked' : ''} style="width:18px; height:18px; pointer-events:none;" />
+                <div class="option-badge">${String.fromCharCode(65 + opt.option_index)}</div>
+                <div>${opt.option_text}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    } else {
+      inputAreaHtml = `
+        <div style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:8px;">[Single Correct MCQ]</div>
+        <div class="options-list">
+          ${(q.question_options || []).map(opt => {
+            const isSelected = userAns === opt.option_index;
+            return `
+              <div class="option-item ${isSelected ? 'selected' : ''}" onclick="Exam.selectOption(${opt.option_index})">
+                <div class="option-badge">${String.fromCharCode(65 + opt.option_index)}</div>
+                <div>${opt.option_text}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
     target.innerHTML = `
       <div style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:8px;">
-        ${this.sections[this.currentSectionIndex].title} — Question ${this.currentQuestionIndex + 1} of ${activeQuestions.length}
+        ${this.sections[this.currentSectionIndex].title} — Question ${this.currentQuestionIndex + 1} of ${activeQuestions.length} (${qType})
       </div>
       ${sharedBanner}
       <div class="exam-question-text">${q.question_text}</div>
-      <div class="options-list">
-        ${q.question_options.map(opt => `
-          <div class="option-item ${selectedOpt === opt.option_index ? 'selected' : ''}" onclick="Exam.selectOption(${opt.option_index})">
-            <div class="option-badge">${String.fromCharCode(65 + opt.option_index)}</div>
-            <div>${opt.option_text}</div>
-          </div>
-        `).join('')}
-      </div>
+      ${inputAreaHtml}
     `;
 
     this.renderPalette();
@@ -504,6 +543,37 @@ window.Exam = {
     const q = this.questionsBySection[this.currentSectionIndex][this.currentQuestionIndex];
     this.answers[q.id] = optIndex;
     this.renderCurrentQuestion();
+    this.saveLocalProgress();
+  },
+
+  toggleMsqOption(qId, optIndex) {
+    if (this.isPaused) return;
+    let current = this.answers[qId];
+    if (!Array.isArray(current)) current = [];
+
+    if (current.includes(optIndex)) {
+      current = current.filter(i => i !== optIndex);
+    } else {
+      current.push(optIndex);
+    }
+
+    if (current.length === 0) {
+      delete this.answers[qId];
+    } else {
+      this.answers[qId] = current;
+    }
+
+    this.renderCurrentQuestion();
+    this.saveLocalProgress();
+  },
+
+  setNatAnswer(qId, val) {
+    if (this.isPaused) return;
+    if (val === '' || val === null) {
+      delete this.answers[qId];
+    } else {
+      this.answers[qId] = parseFloat(val);
+    }
     this.saveLocalProgress();
   },
 
@@ -754,39 +824,68 @@ window.Exam = {
     this.sections.forEach(s => { secObjMap[s.id] = s; });
 
     this.allQuestionsFlat.forEach(q => {
-      const sec = secObjMap[q.section_id] || this.sections[0] || { marks_correct: 1.0, marks_incorrect: 0.25, marks_unattempted: 0 };
-      maxScore += Number(sec.marks_correct);
-      const selected = this.answers[q.id];
+      const sec = secObjMap[q.section_id] || this.sections[0] || { marks_correct: 1.0, marks_incorrect: 0.33, marks_unattempted: 0 };
+      const marksCorrect = Number(sec.marks_correct ?? 1.0);
+      const marksIncorrect = Number(sec.marks_incorrect ?? 0.33);
+      maxScore += marksCorrect;
 
-      if (selected === undefined || selected === null) {
+      const userAns = this.answers[q.id];
+      const qType = q.question_type || 'MCQ';
+
+      let isCorrect = false;
+      let isAttempted = false;
+
+      if (userAns !== undefined && userAns !== null) {
+        isAttempted = true;
+        if (qType === 'MCQ') {
+          if (userAns === q.correct_option_index) isCorrect = true;
+        } else if (qType === 'MSQ') {
+          const correctSet = (q.correct_option_indexes || [q.correct_option_index || 0]).sort();
+          const userSet = Array.isArray(userAns) ? [...userAns].sort() : [userAns];
+          if (correctSet.length === userSet.length && correctSet.every((val, idx) => val === userSet[idx])) {
+            isCorrect = true;
+          }
+        } else if (qType === 'NAT') {
+          const numVal = parseFloat(userAns);
+          const minRange = q.correct_numeric_min !== null ? Number(q.correct_numeric_min) : q.correct_numeric_max;
+          const maxRange = q.correct_numeric_max !== null ? Number(q.correct_numeric_max) : q.correct_numeric_min;
+          if (!isNaN(numVal) && minRange !== null && maxRange !== null && numVal >= minRange && numVal <= maxRange) {
+            isCorrect = true;
+          }
+        }
+      }
+
+      if (!isAttempted) {
         unattemptedCount++;
-        totalScore += Number(sec.marks_unattempted);
+        totalScore += 0;
         answerInserts.push({
           attempt_id: this.attemptId,
           question_id: q.id,
           selected_option_index: null,
           is_correct: false,
-          marks_awarded: Number(sec.marks_unattempted)
+          marks_awarded: 0
         });
-      } else if (selected === q.correct_option_index) {
+      } else if (isCorrect) {
         correctCount++;
-        totalScore += Number(sec.marks_correct);
+        totalScore += marksCorrect;
         answerInserts.push({
           attempt_id: this.attemptId,
           question_id: q.id,
-          selected_option_index: selected,
+          selected_option_index: Array.isArray(userAns) ? userAns[0] : userAns,
           is_correct: true,
-          marks_awarded: Number(sec.marks_correct)
+          marks_awarded: marksCorrect
         });
       } else {
         incorrectCount++;
-        totalScore -= Number(sec.marks_incorrect);
+        // GATE rule: MSQ and NAT generally have 0 negative marking unless explicitly defined, but we apply section negative marking rule for MCQ/MSQ/NAT
+        const appliedNeg = (qType === 'MSQ') ? 0 : marksIncorrect; 
+        totalScore -= appliedNeg;
         answerInserts.push({
           attempt_id: this.attemptId,
           question_id: q.id,
-          selected_option_index: selected,
+          selected_option_index: Array.isArray(userAns) ? userAns[0] : userAns,
           is_correct: false,
-          marks_awarded: -Number(sec.marks_incorrect)
+          marks_awarded: -appliedNeg
         });
       }
     });
