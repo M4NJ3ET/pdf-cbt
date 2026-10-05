@@ -344,7 +344,6 @@ window.Host = {
     const { data: folders } = await window.sb.from('folders').select('*').order('name');
     const folderList = folders || [];
 
-    // Extract unique sections in order of appearance
     const uniqueSecs = [];
     draft.questions.forEach(q => {
       const secName = (q.section || 'General').trim();
@@ -508,7 +507,7 @@ window.Host = {
               </div>
             </div>
 
-            <!-- Section-Wise Setup Table with Rename & Reorder -->
+            <!-- Section-Wise Setup Table -->
             <div style="margin:20px 0; background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
               <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Sectional Rules, Renaming & Reordering</h4>
               <div style="overflow-x:auto;">
@@ -593,7 +592,7 @@ window.Host = {
             <div class="form-row" style="margin-top:10px;">
               <label style="display:flex; align-items:center; gap:8px;">
                 <input type="checkbox" id="cfg-shuffle-q" style="width:auto;" ${draft.shuffle_questions !== false ? 'checked' : ''} /> 
-                Intra-Section Shuffling
+                Intra-Section Shuffling (Shuffles questions within each section while keeping linked group questions together)
               </label>
             </div>
 
@@ -616,11 +615,15 @@ window.Host = {
 
   renameSection(oldIdx, newName) {
     const draft = window.AppState.parsedExamDraft;
-    const rows = document.querySelectorAll('#sections-table tbody tr');
-    const oldNameInput = rows[oldIdx]?.querySelector('.sec-name-input');
-    const oldName = oldNameInput?.defaultValue || uniqueSecsName(oldIdx);
+    const uniqueSecs = [];
+    draft.questions.forEach(q => {
+      const sName = (q.section || 'General').trim();
+      if (!uniqueSecs.includes(sName)) uniqueSecs.push(sName);
+    });
 
-    // Update all questions belonging to this section name
+    const oldName = uniqueSecs[oldIdx];
+    if (!oldName) return;
+
     draft.questions.forEach(q => {
       if ((q.section || 'General').trim() === oldName.trim()) {
         q.section = newName.trim();
@@ -645,7 +648,6 @@ window.Host = {
     uniqueSecs.splice(secIdx, 1);
     uniqueSecs.splice(targetIdx, 0, secToMove);
 
-    // Reorder questions in draft according to new section order
     let reorderedQuestions = [];
     uniqueSecs.forEach(sName => {
       const matching = draft.questions.filter(q => (q.section || 'General').trim() === sName);
@@ -779,15 +781,6 @@ window.Host = {
     if (timingMode === 'GLOBAL') {
       totalExamDuration = globalDur;
     }
-
-    // Remap question sections based on edited table row names
-    const activeSecNames = sectionsConfig.map(s => s.title);
-    draft.questions.forEach((q, qIdx) => {
-      const currentRowSec = (q.section || 'General').trim();
-      // Match by index if rows match
-      const matchedSec = activeSecNames[qIdx] || activeSecNames[0] || 'General';
-      q.section = matchedSec;
-    });
 
     window.showLoading(
       isEditing ? 'Updating Exam Paper...' : 'Publishing Exam...',
@@ -989,7 +982,6 @@ window.Host = {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   },
 
-  // 5. Folders & Allocation Management
   async renderFolderManager(container) {
     const target = this.getTarget(container);
     if (!target) return;
@@ -1151,7 +1143,6 @@ window.Host = {
     });
   },
 
-  // 6. My Tests List
   async renderMyTests(container) {
     const target = this.getTarget(container);
     if (!target) return;
@@ -1233,7 +1224,6 @@ window.Host = {
     });
   },
 
-  // 7. User Access Management
   async renderUserManager(container) {
     const target = this.getTarget(container);
     if (!target) return;
