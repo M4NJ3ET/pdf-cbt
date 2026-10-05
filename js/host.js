@@ -331,7 +331,7 @@ window.Host = {
     }
   },
 
-  // 3. Review & Sectional Settings View with Live Total Marks Calculator
+  // 3. Review & Sectional Settings View
   async renderReview(container) {
     const target = this.getTarget(container);
     if (!target) return;
@@ -356,6 +356,8 @@ window.Host = {
     if (draft.existingSections) {
       draft.existingSections.forEach(s => { existingSecMap[s.title] = s; });
     }
+
+    const isGlobalMode = !draft.existingSections || draft.existingSections.every(s => s.allow_switching === true);
 
     let qHtml = draft.questions.map((q, qIndex) => {
       const isGrouped = !!q.group_id;
@@ -457,7 +459,7 @@ window.Host = {
     target.innerHTML = `
       <div style="max-width: 960px; margin: 0 auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h2>${isEditing ? '✏️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>
+          <h2>${isEditing ? '✏️️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>
           ${isEditing ? `<span style="background:#e0f2fe; color:#0369a1; padding:4px 12px; border-radius:14px; font-weight:700; font-size:0.85rem;">Editing Existing Test</span>` : ''}
         </div>
         <p style="color:var(--text-secondary); margin-bottom:20px;">Review question types (MCQ, MSQ, NAT), verify answer keys, and set section rules below.</p>
@@ -496,8 +498,8 @@ window.Host = {
               <div class="form-group" style="margin-bottom:0;">
                 <label style="font-weight:700; color:var(--primary-accent); margin-bottom:6px;">⏱️ Exam Timing Mode</label>
                 <select id="cfg-timing-mode" onchange="Host.toggleTimingMode(this.value)">
-                  <option value="GLOBAL" ${draft.duration_minutes && !draft.existingSections?.some(s => s.allow_switching === false) ? 'selected' : ''}>Global Combined Timer (e.g. 180 Mins across all sections)</option>
-                  <option value="SECTIONAL">Sectional Timers (Locked individual section durations)</option>
+                  <option value="GLOBAL" ${isGlobalMode ? 'selected' : ''}>Global Combined Timer (e.g. 180 Mins across all sections)</option>
+                  <option value="SECTIONAL" ${!isGlobalMode ? 'selected' : ''}>Sectional Timers (Locked individual section durations)</option>
                 </select>
               </div>
               <div class="form-group" id="global-duration-wrapper" style="margin-bottom:0;">
@@ -520,7 +522,7 @@ window.Host = {
                       <th style="padding:8px;">Incorrect (-Marks)</th>
                       <th style="padding:8px;">Section Marks</th>
                       <th style="padding:8px;">Cutoff</th>
-                      <th style="padding:8px;">Lock & Switch</th>
+                      <th style="padding:8px;">Navigation</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -692,7 +694,7 @@ window.Host = {
     Host.renderReview();
   },
 
-  // 4. Save into Supabase with Global/Sectional Timing & Live Total Marks
+  // 4. Save into Supabase with Zero Negative Marking & Global/Sectional Durations
   async saveAndPublishExam(uniqueSecs) {
     const draft = window.AppState.parsedExamDraft;
     const isEditing = !!this.editingTestId;
@@ -711,7 +713,10 @@ window.Host = {
       const row = rows[sIdx];
       const dur = timingMode === 'GLOBAL' ? Math.round(globalDur / uniqueSecs.length) : (parseInt(row?.querySelector('.sec-time-input')?.value) || 60);
       const correctM = parseFloat(row?.querySelector('.sec-correct-input')?.value) || 1.0;
-      const incorrectM = parseFloat(row?.querySelector('.sec-incorrect-input')?.value) || 0.33;
+      // Fixed: use !== "" and !== NaN so zero (0) negative marking is correctly saved!
+      const incorrectRaw = row?.querySelector('.sec-incorrect-input')?.value;
+      const incorrectM = (incorrectRaw !== '' && !isNaN(parseFloat(incorrectRaw))) ? parseFloat(incorrectRaw) : 0.0;
+      
       const cut = parseFloat(row?.querySelector('.sec-cutoff-input')?.value) || 0;
       const allowSwitch = timingMode === 'GLOBAL' ? true : (row?.querySelector('.sec-switch-select')?.value === 'true');
 
@@ -879,7 +884,7 @@ window.Host = {
       const portalUrl = `https://mockorbit-cbt.vercel.app`;
       const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
         `📌 *Exam:* ${title}\n` +
-        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}:${s.duration_minutes}m`).join(' | ')})\n\n` +
+        `⏱️ *Total Duration:* ${totalExamDuration} mins\n\n` +
         `🔑 *Test Key:* ${code}\n` +
         `🔗 *Direct Test Link:* ${examUrl}\n\n` +
         `Login and enter the key at: ${portalUrl}`;
@@ -890,7 +895,7 @@ window.Host = {
           <div style="font-size:2.8rem; margin-bottom:8px;">${isEditing ? '💾' : '🎉'}</div>
           <h2>${isEditing ? 'Exam Updated Successfully!' : 'Exam Published Successfully!'}</h2>
           <p style="color:var(--text-secondary); margin-bottom:20px;">
-            ${isEditing ? 'All question types, timing modes, and marking rules have been updated.' : 'Your exam is live. Share the key with candidates:'}
+            ${isEditing ? 'All timing modes and zero negative marking configurations have been updated.' : 'Your exam is live. Share the key with candidates:'}
           </p>
           
           <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
@@ -899,8 +904,7 @@ window.Host = {
 
           <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
             <p><strong>Exam Name:</strong> ${title}</p>
-            <p><strong>Timing Mode:</strong> ${timingMode === 'GLOBAL' ? `Global (${totalExamDuration} Mins)` : 'Sectional Timers'}</p>
-            <p><strong>Sections:</strong> ${sectionsConfig.map(s => `${s.title} (+${s.marks_correct}/-${s.marks_incorrect})`).join(' → ')}</p>
+            <p><strong>Total Duration:</strong> ${totalExamDuration} Minutes</p>
             <p><strong>Test Key:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${code}</span></p>
           </div>
 
