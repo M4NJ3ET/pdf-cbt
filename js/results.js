@@ -83,7 +83,7 @@ window.Results = {
     }
   },
 
-  // 2. Scorecard with Sectional Breakdown
+  // 2. Scorecard with Sectional Breakdown & Question Type Analysis
   async renderResult(container, attemptId) {
     container.innerHTML = `
       <div class="card" style="text-align:center; padding:30px;">
@@ -109,7 +109,6 @@ window.Results = {
       const test = attempt.tests;
       const sections = test.sections || [];
 
-      // Calculate Sectional Scores
       const sectionScores = {};
       sections.forEach(s => {
         sectionScores[s.id] = { title: s.title, cutoff: s.cutoff_score || 0, score: 0, max: 0, passed: true };
@@ -123,11 +122,31 @@ window.Results = {
 
           if (q.section_id && sectionScores[q.section_id]) {
             sectionScores[q.section_id].score += Number(ans.marks_awarded || 0);
-            sectionScores[q.section_id].max += 1.0; // approx per question
+            sectionScores[q.section_id].max += 1.0;
           }
 
-          const userChosenOpt = q.question_options?.find(o => o.option_index === ans.selected_option_index);
-          const correctOpt = q.question_options?.find(o => o.option_index === q.correct_option_index);
+          const qType = q.question_type || 'MCQ';
+          let userAnsDisplay = 'None';
+          let correctAnsDisplay = '';
+
+          if (qType === 'NAT') {
+            userAnsDisplay = ans.selected_option_index !== null && ans.selected_option_index !== undefined ? ans.selected_option_index : 'None';
+            const minR = q.correct_numeric_min;
+            const maxR = q.correct_numeric_max;
+            correctAnsDisplay = minR === maxR ? `${minR}` : `Range [${minR} to ${maxR}]`;
+          } else if (qType === 'MSQ') {
+            const chosenOpts = q.question_options?.filter(o => Array.isArray(ans.selected_option_index) && ans.selected_option_index.includes(o.option_index)) || [];
+            userAnsDisplay = chosenOpts.length > 0 ? chosenOpts.map(o => `(${String.fromCharCode(65 + o.option_index)}) ${o.option_text}`).join(', ') : 'None';
+
+            const correctOpts = q.question_options?.filter(o => (q.correct_option_indexes || []).includes(o.option_index)) || [];
+            correctAnsDisplay = correctOpts.map(o => `(${String.fromCharCode(65 + o.option_index)}) ${o.option_text}`).join(', ');
+          } else {
+            const userChosenOpt = q.question_options?.find(o => o.option_index === ans.selected_option_index);
+            userAnsDisplay = userChosenOpt ? `(${String.fromCharCode(65 + userChosenOpt.option_index)}) ${userChosenOpt.option_text}` : 'None';
+
+            const correctOpt = q.question_options?.find(o => o.option_index === q.correct_option_index);
+            correctAnsDisplay = correctOpt ? `(${String.fromCharCode(65 + correctOpt.option_index)}) ${correctOpt.option_text}` : 'N/A';
+          }
 
           let badge = '';
           if (ans.selected_option_index === null || ans.selected_option_index === undefined) {
@@ -141,13 +160,13 @@ window.Results = {
           return `
             <div style="border-bottom:1px solid var(--border-color); padding:14px 0;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                <strong>Question ${idx + 1}</strong>
+                <strong>Question ${idx + 1} <span style="font-size:0.75rem; background:#f1f5f9; padding:2px 6px; border-radius:4px; margin-left:6px;">${qType}</span></strong>
                 <div>${badge}</div>
               </div>
               <p style="margin-bottom:8px;">${q.question_text}</p>
               <div style="font-size:0.9rem; line-height:1.6; background:var(--bg-muted); padding:10px 12px; border-radius:6px;">
-                <p>Your Answer: <strong>${userChosenOpt ? userChosenOpt.option_text : 'None'}</strong></p>
-                <p>Correct Answer: <strong style="color:var(--success);">${correctOpt ? correctOpt.option_text : 'N/A'}</strong></p>
+                <p>Your Answer: <strong>${userAnsDisplay}</strong></p>
+                <p>Correct Answer: <strong style="color:var(--success);">${correctAnsDisplay}</strong></p>
                 ${q.explanation ? `<p style="margin-top:6px; color:var(--text-secondary);"><em>Solution:</em> ${q.explanation}</p>` : ''}
               </div>
             </div>
@@ -155,7 +174,6 @@ window.Results = {
         }).join('');
       }
 
-      // Check section cutoffs
       let allSectionCutoffsCleared = true;
       Object.values(sectionScores).forEach(sc => {
         if (sc.cutoff > 0 && sc.score < sc.cutoff) {
@@ -190,7 +208,6 @@ window.Results = {
               </div>
             </div>
 
-            <!-- Sectional Breakdown Table -->
             ${sections.length > 1 ? `
               <div style="margin:20px 0; background:var(--bg-muted); padding:16px; border-radius:var(--radius-md); text-align:left;">
                 <h4 style="margin-bottom:10px;">📊 Sectional Score Breakdown</h4>
