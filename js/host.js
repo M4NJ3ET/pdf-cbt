@@ -101,7 +101,7 @@ window.Host = {
 
   normalizeDraft(raw) {
     const title = raw.title || raw.test_title || raw.exam_title || 'Practice Mock Exam';
-    const duration = raw.duration_minutes || raw.duration || 60;
+    const duration = raw.duration_minutes || raw.duration || 180;
     const questionsRaw = raw.questions || [];
 
     const charMap = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, '1': 0, '2': 1, '3': 2, '4': 3 };
@@ -224,7 +224,7 @@ window.Host = {
     this.editingTestId = null;
     window.AppState.parsedExamDraft = {
       title: 'Manual Practice Test',
-      duration_minutes: 60,
+      duration_minutes: 180,
       questions: [
         {
           num: 1,
@@ -331,7 +331,7 @@ window.Host = {
     }
   },
 
-  // 3. Review & Sectional Settings View
+  // 3. Review & Sectional Settings View with Live Total Marks Calculator
   async renderReview(container) {
     const target = this.getTarget(container);
     if (!target) return;
@@ -460,7 +460,7 @@ window.Host = {
           <h2>${isEditing ? '✏️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>
           ${isEditing ? `<span style="background:#e0f2fe; color:#0369a1; padding:4px 12px; border-radius:14px; font-weight:700; font-size:0.85rem;">Editing Existing Test</span>` : ''}
         </div>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Review question types (MCQ, MSQ, NAT), verify answer keys, and set section-specific marking below.</p>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Review question types (MCQ, MSQ, NAT), verify answer keys, and set section rules below.</p>
 
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question</button>
@@ -469,10 +469,10 @@ window.Host = {
 
         <div>${qHtml}</div>
 
-        <!-- Sectional Configuration Form with Per-Section Marking -->
+        <!-- Sectional Configuration Form -->
         <div class="card" id="settings-anchor" style="margin-top:40px; background:var(--bg-muted);">
           <h3 style="margin-bottom:8px;">Exam & Section Configuration</h3>
-          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Set individual durations, cutoffs, and section-specific marking rules.</p>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Set global or sectional timing, locking rules, and view total marks.</p>
 
           <form id="exam-config-form">
             <div class="form-row">
@@ -491,20 +491,36 @@ window.Host = {
               </div>
             </div>
 
-            <!-- Section-Wise Setup Table with Custom Negative Marking -->
+            <!-- Global vs Sectional Duration Mode Toggle -->
+            <div class="form-row" style="background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px;">
+              <div class="form-group" style="margin-bottom:0;">
+                <label style="font-weight:700; color:var(--primary-accent); margin-bottom:6px;">⏱️ Exam Timing Mode</label>
+                <select id="cfg-timing-mode" onchange="Host.toggleTimingMode(this.value)">
+                  <option value="GLOBAL" ${draft.duration_minutes && !draft.existingSections?.some(s => s.allow_switching === false) ? 'selected' : ''}>Global Combined Timer (e.g. 180 Mins across all sections)</option>
+                  <option value="SECTIONAL">Sectional Timers (Locked individual section durations)</option>
+                </select>
+              </div>
+              <div class="form-group" id="global-duration-wrapper" style="margin-bottom:0;">
+                <label>Total Exam Duration (Mins)</label>
+                <input type="number" id="cfg-global-duration" value="${draft.duration_minutes || 180}" min="1" required />
+              </div>
+            </div>
+
+            <!-- Section-Wise Setup Table -->
             <div style="margin:20px 0; background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
-              <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Section-Specific Rules & Marking Formulas</h4>
+              <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Sectional Rules & Live Marks Calculation</h4>
               <div style="overflow-x:auto;">
-                <table style="width:100%; border-collapse:collapse; font-size:0.9rem; text-align:left;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.9rem; text-align:left;" id="sections-table">
                   <thead>
                     <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary);">
                       <th style="padding:8px;">Section</th>
                       <th style="padding:8px;">Questions</th>
-                      <th style="padding:8px;">Duration (Mins)</th>
+                      <th style="padding:8px;" class="sec-time-col">Duration (Mins)</th>
                       <th style="padding:8px;">Correct (+Marks)</th>
                       <th style="padding:8px;">Incorrect (-Marks)</th>
+                      <th style="padding:8px;">Section Marks</th>
                       <th style="padding:8px;">Cutoff</th>
-                      <th style="padding:8px;">Lock</th>
+                      <th style="padding:8px;">Lock & Switch</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -515,28 +531,31 @@ window.Host = {
                       const correctVal = ex.marks_correct !== undefined ? ex.marks_correct : 1.0;
                       const incorrectVal = ex.marks_incorrect !== undefined ? ex.marks_incorrect : 0.33;
                       const cutVal = ex.cutoff_score || 0;
-                      const switchVal = ex.allow_switching ? 'true' : 'false';
+                      const switchVal = ex.allow_switching !== false ? 'true' : 'false';
 
                       return `
-                        <tr style="border-bottom:1px solid var(--border-color);">
+                        <tr style="border-bottom:1px solid var(--border-color);" data-sec-row="${sIdx}">
                           <td style="padding:10px 8px;"><strong>${sec}</strong></td>
-                          <td style="padding:10px 8px;">${count}</td>
-                          <td style="padding:10px 8px;">
-                            <input type="number" id="sec-time-${sIdx}" value="${durVal}" min="1" required style="width:80px;" />
+                          <td style="padding:10px 8px;" class="sec-q-count">${count}</td>
+                          <td style="padding:10px 8px;" class="sec-time-col">
+                            <input type="number" class="sec-time-input" value="${durVal}" min="1" style="width:75px;" />
                           </td>
                           <td style="padding:10px 8px;">
-                            <input type="number" step="0.25" id="sec-correct-${sIdx}" value="${correctVal}" required style="width:75px;" />
+                            <input type="number" step="0.25" class="sec-correct-input" value="${correctVal}" oninput="Host.recalculateLiveMarks()" style="width:70px;" />
                           </td>
                           <td style="padding:10px 8px;">
-                            <input type="number" step="0.01" id="sec-incorrect-${sIdx}" value="${incorrectVal}" required style="width:75px;" />
+                            <input type="number" step="0.01" class="sec-incorrect-input" value="${incorrectVal}" style="width:70px;" />
+                          </td>
+                          <td style="padding:10px 8px; font-weight:700; color:var(--primary-accent);" class="sec-total-marks">
+                            ${(count * correctVal).toFixed(1)}
                           </td>
                           <td style="padding:10px 8px;">
-                            <input type="number" step="0.5" id="sec-cutoff-${sIdx}" value="${cutVal}" min="0" style="width:75px;" />
+                            <input type="number" step="0.5" class="sec-cutoff-input" value="${cutVal}" min="0" style="width:65px;" />
                           </td>
                           <td style="padding:10px 8px;">
-                            <select id="sec-switch-${sIdx}" style="width:100px;">
-                              <option value="false" ${switchVal === 'false' ? 'selected' : ''}>🔒 Locked</option>
+                            <select class="sec-switch-select" style="width:100px;">
                               <option value="true" ${switchVal === 'true' ? 'selected' : ''}>🔓 Free</option>
+                              <option value="false" ${switchVal === 'false' ? 'selected' : ''}>🔒 Locked</option>
                             </select>
                           </td>
                         </tr>
@@ -545,9 +564,12 @@ window.Host = {
                   </tbody>
                 </table>
               </div>
-              <p style="font-size:0.82rem; color:var(--text-secondary); margin-top:10px;">
-                💡 <strong>Incorrect (-Marks)</strong> allows setting GATE ratios like <code>0.33</code> (for -1/3), <code>0.25</code> (for -1/4), or <code>0</code> for zero negative marking.
-              </p>
+
+              <!-- Live Grand Total Marks Display -->
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:12px; border-top:1px dashed var(--border-color); font-size:1.05rem;">
+                <span>🎯 <strong>Grand Total Exam Marks:</strong> <span id="grand-total-marks" style="color:var(--primary-accent); font-weight:800;">0.0</span></span>
+                <span style="font-size:0.85rem; color:var(--text-secondary);">Calculated as sum of all (Questions × Correct Marks) per section.</span>
+              </div>
             </div>
 
             <div class="form-row">
@@ -579,10 +601,41 @@ window.Host = {
       </div>
     `;
 
+    Host.recalculateLiveMarks();
+    Host.toggleTimingMode(document.getElementById('cfg-timing-mode').value);
+
     document.getElementById('exam-config-form').onsubmit = (e) => {
       e.preventDefault();
       Host.saveAndPublishExam(uniqueSecs);
     };
+  },
+
+  toggleTimingMode(mode) {
+    const globalWrapper = document.getElementById('global-duration-wrapper');
+    const timeCols = document.querySelectorAll('.sec-time-col');
+    if (mode === 'GLOBAL') {
+      if (globalWrapper) globalWrapper.style.display = 'block';
+      timeCols.forEach(el => el.style.display = 'none');
+    } else {
+      if (globalWrapper) globalWrapper.style.display = 'none';
+      timeCols.forEach(el => el.style.display = 'table-cell');
+    }
+  },
+
+  recalculateLiveMarks() {
+    let grandTotal = 0;
+    const rows = document.querySelectorAll('#sections-table tbody tr');
+    rows.forEach(row => {
+      const qCount = parseFloat(row.querySelector('.sec-q-count')?.innerText || 0);
+      const correctInput = parseFloat(row.querySelector('.sec-correct-input')?.value || 0);
+      const secTotalElem = row.querySelector('.sec-total-marks');
+      const secScore = qCount * correctInput;
+      if (secTotalElem) secTotalElem.innerText = secScore.toFixed(1);
+      grandTotal += secScore;
+    });
+
+    const grandTotalElem = document.getElementById('grand-total-marks');
+    if (grandTotalElem) grandTotalElem.innerText = grandTotal.toFixed(1);
   },
 
   updateQText(idx, val) { window.AppState.parsedExamDraft.questions[idx].question_text = val; },
@@ -639,23 +692,29 @@ window.Host = {
     Host.renderReview();
   },
 
-  // 4. Save into Supabase with Question Types & Section Marking
+  // 4. Save into Supabase with Global/Sectional Timing & Live Total Marks
   async saveAndPublishExam(uniqueSecs) {
     const draft = window.AppState.parsedExamDraft;
     const isEditing = !!this.editingTestId;
     const title = document.getElementById('cfg-title').value.trim();
     const folderId = document.getElementById('cfg-folder').value || null;
+    const timingMode = document.getElementById('cfg-timing-mode').value;
+    const globalDur = parseInt(document.getElementById('cfg-global-duration')?.value) || 180;
     const passType = document.getElementById('cfg-pass-type').value;
     const passScore = parseFloat(document.getElementById('cfg-pass-score').value);
     const shuffleQ = document.getElementById('cfg-shuffle-q').checked;
 
     let totalExamDuration = 0;
+    const rows = document.querySelectorAll('#sections-table tbody tr');
+    
     const sectionsConfig = uniqueSecs.map((secName, sIdx) => {
-      const dur = parseInt(document.getElementById(`sec-time-${sIdx}`).value) || 60;
-      const correctM = parseFloat(document.getElementById(`sec-correct-${sIdx}`).value) || 1.0;
-      const incorrectM = parseFloat(document.getElementById(`sec-incorrect-${sIdx}`).value) || 0.33;
-      const cut = parseFloat(document.getElementById(`sec-cutoff-${sIdx}`).value) || 0;
-      const allowSwitch = document.getElementById(`sec-switch-${sIdx}`).value === 'true';
+      const row = rows[sIdx];
+      const dur = timingMode === 'GLOBAL' ? Math.round(globalDur / uniqueSecs.length) : (parseInt(row?.querySelector('.sec-time-input')?.value) || 60);
+      const correctM = parseFloat(row?.querySelector('.sec-correct-input')?.value) || 1.0;
+      const incorrectM = parseFloat(row?.querySelector('.sec-incorrect-input')?.value) || 0.33;
+      const cut = parseFloat(row?.querySelector('.sec-cutoff-input')?.value) || 0;
+      const allowSwitch = timingMode === 'GLOBAL' ? true : (row?.querySelector('.sec-switch-select')?.value === 'true');
+
       totalExamDuration += dur;
       return {
         title: secName,
@@ -670,9 +729,13 @@ window.Host = {
       };
     });
 
+    if (timingMode === 'GLOBAL') {
+      totalExamDuration = globalDur;
+    }
+
     window.showLoading(
       isEditing ? 'Updating Exam Paper...' : 'Publishing Exam...',
-      'Saving sectional marking formulas, question types, and configuration...'
+      'Saving sectional marking formulas, timing modes, and configuration...'
     );
 
     try {
@@ -771,7 +834,7 @@ window.Host = {
       const secMap = {};
       insertedSections.forEach(s => { secMap[s.title] = s.id; });
 
-      // Insert Questions with Question Type parameters
+      // Insert Questions
       for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
         const q = draft.questions[qIdx];
         const secId = secMap[(q.section || 'General').trim()] || insertedSections[0].id;
@@ -827,7 +890,7 @@ window.Host = {
           <div style="font-size:2.8rem; margin-bottom:8px;">${isEditing ? '💾' : '🎉'}</div>
           <h2>${isEditing ? 'Exam Updated Successfully!' : 'Exam Published Successfully!'}</h2>
           <p style="color:var(--text-secondary); margin-bottom:20px;">
-            ${isEditing ? 'All question types, MSQ keys, and marking rules have been updated.' : 'Your GATE/IOCL sectional exam is live. Share the key with candidates:'}
+            ${isEditing ? 'All question types, timing modes, and marking rules have been updated.' : 'Your exam is live. Share the key with candidates:'}
           </p>
           
           <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
@@ -836,8 +899,8 @@ window.Host = {
 
           <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
             <p><strong>Exam Name:</strong> ${title}</p>
-            <p><strong>Sections:</strong> ${sectionsConfig.map(s => `${s.title} (${s.duration_minutes}m, +${s.marks_correct}/-${s.marks_incorrect})`).join(' → ')}</p>
-            <p><strong>Total Duration:</strong> ${totalExamDuration} Minutes</p>
+            <p><strong>Timing Mode:</strong> ${timingMode === 'GLOBAL' ? `Global (${totalExamDuration} Mins)` : 'Sectional Timers'}</p>
+            <p><strong>Sections:</strong> ${sectionsConfig.map(s => `${s.title} (+${s.marks_correct}/-${s.marks_incorrect})`).join(' → ')}</p>
             <p><strong>Test Key:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${code}</span></p>
           </div>
 
@@ -1068,7 +1131,7 @@ window.Host = {
             <p style="color:var(--text-secondary); font-size:0.88rem;">Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Duration: ${t.duration_minutes}m</p>
           </div>
           <div style="display:flex; gap:8px;">
-            <button class="btn-primary" style="padding:6px 12px; font-size:0.85rem;" onclick="Host.loadTestForEdit('${t.id}')">✏️️ Edit</button>
+            <button class="btn-primary" style="padding:6px 12px; font-size:0.85rem;" onclick="Host.loadTestForEdit('${t.id}')">✏ Edit</button>
             <button class="btn-outline" onclick="navigator.clipboard.writeText('${t.test_key}'); window.showToast('Copied test key!', 'success');">Copy Key</button>
             <a href="#/instructions/${t.test_key}"><button class="btn-secondary">Preview</button></a>
             <button class="btn-danger" onclick="Host.deleteTest('${t.id}')">Delete</button>
