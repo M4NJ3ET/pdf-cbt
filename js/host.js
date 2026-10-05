@@ -5,7 +5,6 @@ window.Host = {
     return container || document.getElementById('sub-view-root') || document.getElementById('app-root');
   },
 
-  // 1. Upload View
   renderUpload(container) {
     this.editingTestId = null;
     const target = this.getTarget(container);
@@ -18,7 +17,6 @@ window.Host = {
           Upload a question paper PDF or import AI-generated JSON directly.
         </p>
 
-        <!-- Dropzone for PDF -->
         <div id="drop-zone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: pointer; background: var(--bg-muted); margin-bottom: 20px;">
           <div style="font-size: 2.2rem; margin-bottom: 8px;">📄</div>
           <p style="font-weight: 600; margin-bottom: 4px;">Click to browse or drop PDF here</p>
@@ -39,13 +37,11 @@ window.Host = {
           <button class="btn-primary" style="margin-top:10px;" onclick="Host.startManualEntry()">Enter Questions Manually</button>
         </div>
 
-        <!-- Section Divider -->
         <div style="text-align:center; margin-bottom:20px; position:relative;">
           <span style="background:#fff; padding:0 12px; color:var(--text-secondary); font-size:0.85rem; font-weight:600;">OR IMPORT AI JSON</span>
           <hr style="position:relative; top:-10px; z-index:-1; border:none; border-top:1px solid var(--border-color);" />
         </div>
 
-        <!-- AI JSON Import -->
         <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px;">
           <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:6px;">Upload or Paste AI-Generated JSON</label>
           
@@ -159,7 +155,9 @@ window.Host = {
         group_id: q.group_id || null,
         shared_context: q.shared_context || '',
         question_text: qText.trim(),
+        image_url: q.image_url || null,
         options: opts,
+        option_image_urls: q.option_image_urls || {},
         question_type: qType,
         correct_option_index: correctIdx,
         correct_option_indexes: correctIdxs,
@@ -232,7 +230,9 @@ window.Host = {
           group_id: null,
           shared_context: '',
           question_text: 'Enter your question text here',
+          image_url: null,
           options: ['Option A', 'Option B', 'Option C', 'Option D'],
+          option_image_urls: {},
           question_type: 'MCQ',
           correct_option_index: 0,
           correct_option_indexes: [0],
@@ -287,6 +287,11 @@ window.Host = {
           .sort((a, b) => a.option_index - b.option_index)
           .map(o => o.option_text);
 
+        const optionImageUrls = {};
+        (q.question_options || []).forEach(o => {
+          if (o.image_url) optionImageUrls[o.option_index] = o.image_url;
+        });
+
         const qType = q.question_type || 'MCQ';
         if (qType !== 'NAT') {
           while (opts.length < 4) {
@@ -300,7 +305,9 @@ window.Host = {
           group_id: groupId,
           shared_context: sharedContext,
           question_text: qText,
+          image_url: q.image_url || null,
           options: opts,
+          option_image_urls: optionImageUrls,
           question_type: qType,
           correct_option_index: q.correct_option_index || 0,
           correct_option_indexes: q.correct_option_indexes || [q.correct_option_index || 0],
@@ -330,7 +337,59 @@ window.Host = {
     }
   },
 
-  // 3. Review & Sectional Settings View with Section Renaming & Reordering
+  async uploadQuestionImage(qIndex, file) {
+    if (!file) return;
+    window.showLoading('Uploading Image...', 'Uploading image to storage...');
+    try {
+      const fileName = `q_${Date.now()}_${file.name}`;
+      const { data, error } = await window.sb.storage.from('exam-images').upload(fileName, file);
+      if (error) throw error;
+
+      const { data: { publicUrl } } = window.sb.storage.from('exam-images').getPublicUrl(fileName);
+      window.AppState.parsedExamDraft.questions[qIndex].image_url = publicUrl;
+      window.hideLoading();
+      window.showToast('Question image uploaded successfully!', 'success');
+      this.renderReview();
+    } catch (err) {
+      window.hideLoading();
+      window.showToast('Image upload failed: ' + err.message, 'error');
+    }
+  },
+
+  removeQuestionImage(qIndex) {
+    window.AppState.parsedExamDraft.questions[qIndex].image_url = null;
+    this.renderReview();
+  },
+
+  async uploadOptionImage(qIndex, oIndex, file) {
+    if (!file) return;
+    window.showLoading('Uploading Option Image...', 'Uploading option image to storage...');
+    try {
+      const fileName = `opt_${Date.now()}_${file.name}`;
+      const { error } = await window.sb.storage.from('exam-images').upload(fileName, file);
+      if (error) throw error;
+
+      const { data: { publicUrl } } = window.sb.storage.from('exam-images').getPublicUrl(fileName);
+      if (!window.AppState.parsedExamDraft.questions[qIndex].option_image_urls) {
+        window.AppState.parsedExamDraft.questions[qIndex].option_image_urls = {};
+      }
+      window.AppState.parsedExamDraft.questions[qIndex].option_image_urls[oIndex] = publicUrl;
+      window.hideLoading();
+      window.showToast('Option image uploaded successfully!', 'success');
+      this.renderReview();
+    } catch (err) {
+      window.hideLoading();
+      window.showToast('Option image upload failed: ' + err.message, 'error');
+    }
+  },
+
+  removeOptionImage(qIndex, oIndex) {
+    if (window.AppState.parsedExamDraft.questions[qIndex].option_image_urls) {
+      delete window.AppState.parsedExamDraft.questions[qIndex].option_image_urls[oIndex];
+    }
+    this.renderReview();
+  },
+
   async renderReview(container) {
     const target = this.getTarget(container);
     if (!target) return;
@@ -362,6 +421,18 @@ window.Host = {
       const isGrouped = !!q.group_id;
       const qType = q.question_type || 'MCQ';
 
+      const qImgHtml = q.image_url ? `
+        <div style="margin:10px 0; display:flex; align-items:center; gap:10px;">
+          <img src="${q.image_url}" alt="Question Image" style="max-height:120px; border-radius:4px; border:1px solid var(--border-color);" />
+          <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.removeQuestionImage(${qIndex})">Remove Image</button>
+        </div>
+      ` : `
+        <div style="margin:8px 0;">
+          <label style="font-size:0.82rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Attach Question Image (Optional)</label>
+          <input type="file" accept="image/*" onchange="Host.uploadQuestionImage(${qIndex}, this.files[0])" style="font-size:0.85rem;" />
+        </div>
+      `;
+
       let answerConfigHtml = '';
       if (qType === 'NAT') {
         answerConfigHtml = `
@@ -379,14 +450,27 @@ window.Host = {
       } else if (qType === 'MSQ') {
         answerConfigHtml = `
           <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Check ALL Correct Answers for MSQ)</label>
-          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:12px;">
             ${(q.options || []).map((opt, oIndex) => {
               const isChecked = (q.correct_option_indexes || []).includes(oIndex);
+              const optImg = q.option_image_urls?.[oIndex];
               return `
-                <div style="display:flex; align-items:center; gap:10px;">
-                  <input type="checkbox" style="width:20px; height:20px;" ${isChecked ? 'checked' : ''} onchange="Host.toggleMsqOption(${qIndex},${oIndex}, this.checked)">
-                  <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
-                  <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+                <div style="border:1px solid var(--border-color); padding:8px; border-radius:6px; background:var(--bg-muted);">
+                  <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                    <input type="checkbox" style="width:20px; height:20px;" ${isChecked ? 'checked' : ''} onchange="Host.toggleMsqOption(${qIndex},${oIndex}, this.checked)">
+                    <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
+                    <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+                  </div>
+                  ${optImg ? `
+                    <div style="display:flex; align-items:center; gap:8px; margin-left:30px;">
+                      <img src="${optImg}" alt="Option Image" style="max-height:50px; border-radius:4px;" />
+                      <button class="btn-danger" style="padding:2px 6px; font-size:0.75rem;" onclick="Host.removeOptionImage(${qIndex},${oIndex})">Remove Option Image</button>
+                    </div>
+                  ` : `
+                    <div style="margin-left:30px;">
+                      <input type="file" accept="image/*" onchange="Host.uploadOptionImage(${qIndex}, ${oIndex}, this.files[0])" style="font-size:0.78rem;" />
+                    </div>
+                  `}
                 </div>
               `;
             }).join('')}
@@ -396,14 +480,29 @@ window.Host = {
       } else {
         answerConfigHtml = `
           <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Select ONE Correct Answer for MCQ)</label>
-          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
-            ${(q.options || []).map((opt, oIndex) => `
-              <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
-              </div>
-            `).join('')}
+          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:12px;">
+            ${(q.options || []).map((opt, oIndex) => {
+              const optImg = q.option_image_urls?.[oIndex];
+              return `
+                <div style="border:1px solid var(--border-color); padding:8px; border-radius:6px; background:var(--bg-muted);">
+                  <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                    <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
+                    <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
+                    <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+                  </div>
+                  ${optImg ? `
+                    <div style="display:flex; align-items:center; gap:8px; margin-left:30px;">
+                      <img src="${optImg}" alt="Option Image" style="max-height:50px; border-radius:4px;" />
+                      <button class="btn-danger" style="padding:2px 6px; font-size:0.75rem;" onclick="Host.removeOptionImage(${qIndex},${oIndex})">Remove Option Image</button>
+                    </div>
+                  ` : `
+                    <div style="margin-left:30px;">
+                      <input type="file" accept="image/*" onchange="Host.uploadOptionImage(${qIndex}, ${oIndex}, this.files[0])" style="font-size:0.78rem;" />
+                    </div>
+                  `}
+                </div>
+              `;
+            }).join('')}
           </div>
           <button class="btn-secondary" style="font-size:0.85rem; padding:4px 10px; margin-bottom:12px;" onclick="Host.addOption(${qIndex})">+ Add Option</button>
         `;
@@ -438,6 +537,7 @@ window.Host = {
           <div class="form-group">
             <label>Question Text</label>
             <textarea rows="3" onchange="Host.updateQText(${qIndex}, this.value)">${q.question_text}</textarea>
+            ${qImgHtml}
           </div>
 
           <div class="form-group">
@@ -470,7 +570,6 @@ window.Host = {
 
         <div>${qHtml}</div>
 
-        <!-- Sectional Configuration Form -->
         <div class="card" id="settings-anchor" style="margin-top:40px; background:var(--bg-muted);">
           <h3 style="margin-bottom:8px;">Exam & Section Configuration</h3>
           <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Rename sections, reorder them using arrows, and set timing rules.</p>
@@ -492,8 +591,8 @@ window.Host = {
               </div>
             </div>
 
-            <!-- Global vs Sectional Duration Mode Toggle -->
-            <div class="form-row" style="background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px;">
+            <!-- Exam Timing Mode & Section Grouping / Merging -->
+            <div class="form-row" style="background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-bottom:20px; flex-direction:column; gap:12px;">
               <div class="form-group" style="margin-bottom:0;">
                 <label style="font-weight:700; color:var(--primary-accent); margin-bottom:6px;">⏱️ Exam Timing Mode</label>
                 <select id="cfg-timing-mode" onchange="Host.toggleTimingMode(this.value)">
@@ -501,13 +600,22 @@ window.Host = {
                   <option value="SECTIONAL" ${!isGlobalMode ? 'selected' : ''}>Sectional Timers (Locked individual section durations)</option>
                 </select>
               </div>
+
               <div class="form-group" id="global-duration-wrapper" style="margin-bottom:0;">
                 <label>Total Exam Duration (Mins)</label>
                 <input type="number" id="cfg-global-duration" value="${draft.duration_minutes || 180}" min="1" required />
               </div>
+
+              <!-- Feature 5: Section Grouping / Merging Time Limit Option -->
+              <div class="form-group" style="margin-bottom:0; border-top:1px dashed var(--border-color); padding-top:12px;">
+                <label style="font-weight:700; color:var(--text-main); margin-bottom:4px;">🔗 Section Grouping / Time Merging (Optional)</label>
+                <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:8px;">Merge multiple sections under a shared collective time limit (e.g. 3 sections sharing 120 mins while remaining share the rest).</p>
+                <div style="display:flex; gap:10px; align-items:center;">
+                  <input type="text" id="cfg-section-groups" placeholder='e.g. Section A, Section B: 120' value="${draft.section_groups_config || ''}" style="flex:1;" />
+                </div>
+              </div>
             </div>
 
-            <!-- Section-Wise Setup Table -->
             <div style="margin:20px 0; background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
               <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Sectional Rules, Renaming & Reordering</h4>
               <div style="overflow-x:auto;">
@@ -568,7 +676,6 @@ window.Host = {
                 </table>
               </div>
 
-              <!-- Grand Total Marks Display -->
               <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:12px; border-top:1px dashed var(--border-color); font-size:1.05rem;">
                 <span>🎯 <strong>Grand Total Exam Marks:</strong> <span id="grand-total-marks" style="color:var(--primary-accent); font-weight:800;">0.0</span></span>
                 <span style="font-size:0.85rem; color:var(--text-secondary);">Calculated as sum of all section totals.</span>
@@ -729,7 +836,9 @@ window.Host = {
       group_id: null,
       shared_context: '',
       question_text: 'New Question Text',
+      image_url: null,
       options: ['Option A', 'Option B', 'Option C', 'Option D'],
+      option_image_urls: {},
       question_type: 'MCQ',
       correct_option_index: 0,
       correct_option_indexes: [0],
@@ -750,6 +859,7 @@ window.Host = {
     const passType = document.getElementById('cfg-pass-type').value;
     const passScore = parseFloat(document.getElementById('cfg-pass-score').value);
     const shuffleQ = document.getElementById('cfg-shuffle-q').checked;
+    const sectionGroupsConfig = document.getElementById('cfg-section-groups')?.value || '';
 
     const rows = document.querySelectorAll('#sections-table tbody tr');
     let totalExamDuration = 0;
@@ -810,7 +920,8 @@ window.Host = {
             has_sections: true,
             shuffle_questions: shuffleQ,
             passing_score_type: passType,
-            passing_score: passScore
+            passing_score: passScore,
+            section_groups_config: sectionGroupsConfig
           })
           .eq('id', this.editingTestId)
           .select()
@@ -849,6 +960,7 @@ window.Host = {
             shuffle_options: false,
             passing_score_type: passType,
             passing_score: passScore,
+            section_groups_config: sectionGroupsConfig,
             pdf_url: pdfUrl,
             created_by: window.AppState.user.id
           })
@@ -859,7 +971,6 @@ window.Host = {
         testRecord = newTest;
       }
 
-      // Insert Sections
       const { data: insertedSections, error: secErr } = await window.sb
         .from('sections')
         .insert(sectionsConfig.map(sc => ({
@@ -881,7 +992,6 @@ window.Host = {
       const secMap = {};
       insertedSections.forEach(s => { secMap[s.title] = s.id; });
 
-      // Insert Questions
       for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
         const q = draft.questions[qIdx];
         const secId = secMap[(q.section || 'General').trim()] || insertedSections[0].id;
@@ -898,6 +1008,7 @@ window.Host = {
             section_id: secId,
             order_index: qIdx,
             question_text: formattedQuestionText,
+            image_url: q.image_url || null,
             question_type: q.question_type || 'MCQ',
             correct_option_index: q.correct_option_index || 0,
             correct_option_indexes: q.correct_option_indexes || [q.correct_option_index || 0],
@@ -912,7 +1023,8 @@ window.Host = {
           const optPayload = q.options.map((optText, oIdx) => ({
             question_id: qRecord.id,
             option_index: oIdx,
-            option_text: optText
+            option_text: optText,
+            image_url: q.option_image_urls?.[oIdx] || null
           }));
           await window.sb.from('question_options').insert(optPayload);
         }
