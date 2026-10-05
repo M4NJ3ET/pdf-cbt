@@ -66,17 +66,15 @@ window.PdfParser = {
     const questions = [];
     let currentSection = 'General';
 
-    // Grouping / Shared Statement Detection
     let activeSharedContext = null;
     let groupStartQ = null;
     let groupEndQ = null;
 
     const secRegex = /^\s*\b(?:SECTION|PART)\b\s*([0-9A-ZIVX]+)?\s*[:\-–]?\s*([A-Za-z0-9\s&()–\-]+)/i;
-    // Detects ranges: "Q.1-Q.5 Carry ONE mark Each", "Questions 6 to 10 refer to...", "Common Data for Questions 1 to 3"
     const groupRangeRegex = /(?:(?:Question|Q\.?)\s*(\d+)\s*(?:-|to|–)\s*(?:Question|Q\.?)?\s*(\d+)|Common Data for Questions?\s*(\d+)\s*(?:-|to|–)\s*(\d+))(.*)/i;
     const qStartRegex = /^(?:(?:Question|Q\.?)\s*(\d+)[\s:\-–.]+|(\d+)[\.\)]\s+)(.*)/i;
     const optRegex = /^(?:\(([A-D1-4])\)|([A-D1-4])[\.\)])\s*(.*)/i;
-    const ansRegex = /^(?:Correct\s*Answer|Ans(?:wer)?)\s*[:\-–]?\s*\(?([A-D1-4])\)?/i;
+    const ansRegex = /^(?:Correct\s*Answer|Ans(?:wer)?)\s*[:\-–]?\s*(.*)/i;
     const expRegex = /^(?:Explanation|Solution|Exp)\s*[:\-–]?\s*(.*)/i;
 
     let currQ = null;
@@ -84,7 +82,7 @@ window.PdfParser = {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // 1. Check Section Header
+      // 1. Section Header Check
       const secMatch = line.match(secRegex);
       if (secMatch && !line.match(qStartRegex) && line.length < 80) {
         const candidate = secMatch[2]?.trim();
@@ -94,7 +92,7 @@ window.PdfParser = {
         }
       }
 
-      // 2. Check Shared Group Instruction / Statement Range
+      // 2. Shared Statement Range Check
       const grpMatch = line.match(groupRangeRegex);
       if (grpMatch && !line.match(optRegex)) {
         groupStartQ = parseInt(grpMatch[1] || grpMatch[3]);
@@ -103,7 +101,7 @@ window.PdfParser = {
         continue;
       }
 
-      // 3. Check Question Start
+      // 3. Question Start Check
       const qMatch = line.match(qStartRegex);
       if (qMatch) {
         if (currQ) {
@@ -112,7 +110,6 @@ window.PdfParser = {
         }
         const qNum = parseInt(qMatch[1] || qMatch[2]);
 
-        // If this question falls within the active shared group range, bind it
         let contextForThisQ = null;
         let groupId = null;
         if (activeSharedContext && qNum >= groupStartQ && qNum <= groupEndQ) {
@@ -129,7 +126,11 @@ window.PdfParser = {
           shared_context: contextForThisQ,
           question_text: qMatch[3] ? qMatch[3].trim() : '',
           options: [],
+          question_type: 'MCQ',
           correct_option_index: 0,
+          correct_option_indexes: [],
+          correct_numeric_min: null,
+          correct_numeric_max: null,
           explanation: ''
         };
         continue;
@@ -137,32 +138,29 @@ window.PdfParser = {
 
       if (!currQ) continue;
 
-      // 4. Check Options
+      // 4. Option Check
       const optMatch = line.match(optRegex);
       if (optMatch) {
         currQ.options.push(optMatch[3]?.trim() || '');
         continue;
       }
 
-      // 5. Check Answer
+      // 5. Answer Check (Supports MCQ single, MSQ multiple like A;C;D, and NAT ranges like 3 to 3 or 4.24 to 4.26)
       const ansMatch = line.match(ansRegex);
       if (ansMatch) {
-        const letter = ansMatch[1].toUpperCase();
-        const map = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, '1': 0, '2': 1, '3': 2, '4': 3 };
-        if (map[letter] !== undefined) {
-          currQ.correct_option_index = map[letter];
-        }
+        const rawAns = ansMatch[1].trim();
+        this.parseAndAssignAnswer(currQ, rawAns);
         continue;
       }
 
-      // 6. Check Explanation
+      // 6. Explanation Check
       const expMatch = line.match(expRegex);
       if (expMatch) {
         currQ.explanation = expMatch[1]?.trim() || '';
         continue;
       }
 
-      // 7. Append Multiline Text
+      // 7. Multiline Text Continuation
       if (currQ.options.length === 0) {
         currQ.question_text += ' ' + line;
       } else if (currQ.explanation) {
@@ -183,12 +181,60 @@ window.PdfParser = {
     };
   },
 
+  parseAndAssignAnswer(q, rawAns) {
+    const clean = rawAns.replace(/[\(\)]/g, '').trim();
+
+    // Check if it's a NAT range (e.g., "3 to 3" or "4.24 to 4.26" or "1.33-1.35")
+    const rangeMatch = clean.match(/(-?\d*\.?\d+)\s*(?:to|–|-)\s*(-?\d*\.?\d+)/i);
+    if (rangeMatch) {
+      q.question_type = 'NAT';
+      q.correct_numeric_min = parseFloat(rangeMatch[1]);
+      q.correct_numeric_max = parseFloat(rangeMatch[2]);
+      return;
+    }
+
+    // Check if it's a single NAT number
+    if (!isNaN(clean) && clean !== '' && !/[A-D]/.test(clean.toUpperCase())) {
+      q.question_type = 'NAT';
+      const val = parseFloat(clean);
+      q.correct_numeric_min = val;
+      q.correct_numeric_max = val;
+      return;
+    }
+
+    // Check if it's MSQ (multiple letters separated by semicolon, comma, or space like A;C;D or A, C)
+    const letters = clean.split(/[,;\s]+/).map(l => l.toUpperCase().trim()).filter(Boolean);
+    const map = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, '1': 0, '2': 1, '3': 2, '4': 3 };
+
+    if (letters.length > 1 && letters.every(l => map[l] !== undefined)) {
+      q.question_type = 'MSQ';
+      q.correct_option_indexes = letters.map(l => map[l]);
+      q.correct_option_index = q.correct_option_indexes[0] || 0;
+      return;
+    }
+
+    // Default to MCQ single correct
+    if (letters.length === 1 && map[letters[0]] !== undefined) {
+      q.question_type = 'MCQ';
+      q.correct_option_index = map[letters[0]];
+      q.correct_option_indexes = [q.correct_option_index];
+    }
+  },
+
   finalizeQuestion(q) {
     q.question_text = q.question_text.replace(/\s+/g, ' ').trim();
     if (q.explanation) q.explanation = q.explanation.replace(/\s+/g, ' ').trim();
     q.options = q.options.map(opt => opt.replace(/\s+/g, ' ').trim()).filter(Boolean);
-    while (q.options.length < 4) {
-      q.options.push(`Option ${String.fromCharCode(65 + q.options.length)}`);
+
+    // If no options were parsed and it's not explicitly NAT, classify as NAT (Integer/Numerical type)
+    if (q.options.length === 0 && q.question_type !== 'NAT') {
+      q.question_type = 'NAT';
+    }
+
+    if (q.question_type !== 'NAT') {
+      while (q.options.length < 4) {
+        q.options.push(`Option ${String.fromCharCode(65 + q.options.length)}`);
+      }
     }
   }
 };
