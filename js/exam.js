@@ -9,6 +9,8 @@ window.Exam = {
   reviewMarked: {},
   visited: {},
   sectionTimeRemaining: {},
+  globalTimeRemaining: 0,
+  isGlobalTimer: false,
   timerInterval: null,
   attemptId: null,
   isPaused: false,
@@ -139,6 +141,7 @@ window.Exam = {
     }
 
     const sortedSections = (test.sections || []).sort((a, b) => a.order_index - b.order_index);
+    const isGlobal = sortedSections.every(s => s.allow_switching === true);
 
     const storageKey = `cbt_attempt_${test.id}_${window.AppState.user.id}`;
     const savedState = localStorage.getItem(storageKey);
@@ -163,32 +166,32 @@ window.Exam = {
         ${resumeNotice}
 
         <div style="background:var(--bg-muted); padding:16px; border-radius:var(--radius-md); margin-bottom:20px;">
-          <h4 style="margin-bottom:8px;">Section Breakdown & Rules</h4>
+          <h4 style="margin-bottom:8px;">Exam Structure & Timing</h4>
+          <p style="font-size:0.9rem; margin-bottom:10px; color:var(--text-main);">
+            ${isGlobal ? `⏱️ <strong>Global Timer Mode:</strong> You have a total of <strong>${test.duration_minutes} Minutes</strong> to complete the entire exam. You can freely navigate across all sections at any time.` : `🔒 <strong>Sectional Timer Mode:</strong> Individual section timers apply.`}
+          </p>
           <table style="width:100%; border-collapse:collapse; font-size:0.9rem; margin-bottom:12px;">
             <thead>
               <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary); text-align:left;">
                 <th style="padding:6px;">Section</th>
-                <th style="padding:6px;">Time Limit</th>
+                <th style="padding:6px;">Questions</th>
                 <th style="padding:6px;">Correct (+Marks)</th>
                 <th style="padding:6px;">Incorrect (-Marks)</th>
-                <th style="padding:6px;">Cutoff</th>
+                <th style="padding:6px;">Navigation</th>
               </tr>
             </thead>
             <tbody>
               ${sortedSections.map(s => `
                 <tr style="border-bottom:1px solid var(--border-color);">
                   <td style="padding:8px 6px;"><strong>${s.title}</strong></td>
-                  <td style="padding:8px 6px;">${s.duration_minutes || test.duration_minutes} Mins</td>
+                  <td style="padding:8px 6px;">${test.questions?.filter(q => q.section_id === s.id).length || '—'}</td>
                   <td style="padding:8px 6px; color:var(--success); font-weight:600;">+${s.marks_correct ?? 1.0}</td>
                   <td style="padding:8px 6px; color:var(--danger); font-weight:600;">-${s.marks_incorrect ?? 0.33}</td>
-                  <td style="padding:8px 6px;">${s.cutoff_score > 0 ? `${s.cutoff_score} Marks` : 'None'}</td>
+                  <td style="padding:8px 6px;">${s.allow_switching ? '🔓 Free Navigation' : '🔒 Locked'}</td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
-          <p style="font-size:0.85rem; color:var(--text-secondary);">
-            Supports MCQ (Single), MSQ (Multiple), and NAT (Numeric Answer) question types.
-          </p>
         </div>
 
         <h3 style="margin-bottom:10px;">Question Palette Symbols:</h3>
@@ -201,7 +204,7 @@ window.Exam = {
         </div>
 
         <button class="btn-primary" style="width:100%; padding:14px; font-size:1.1rem;" onclick="window.location.hash='#/exam/${test.id}'">
-          ${savedState ? 'Resume In-Progress Exam' : 'I am ready to begin Section 1'}
+          ${savedState ? 'Resume In-Progress Exam' : 'I am ready to begin Exam'}
         </button>
       </div>
     `;
@@ -232,6 +235,9 @@ window.Exam = {
     if (this.sections.length === 0) {
       this.sections = [{ id: 'default', title: 'General', duration_minutes: test.duration_minutes, allow_switching: true, auto_advance: true }];
     }
+
+    // Check if all sections allow free switching (Global Mode)
+    this.isGlobalTimer = this.sections.every(s => s.allow_switching === true);
 
     questions.forEach(q => {
       if (q.question_text && q.question_text.startsWith('[SHARED_GROUP:')) {
@@ -266,9 +272,13 @@ window.Exam = {
     this.sectionTimeRemaining = {};
     this.isPaused = false;
 
-    this.sections.forEach(sec => {
-      this.sectionTimeRemaining[sec.id] = (sec.duration_minutes || test.duration_minutes) * 60;
-    });
+    if (this.isGlobalTimer) {
+      this.globalTimeRemaining = (test.duration_minutes || 180) * 60;
+    } else {
+      this.sections.forEach(sec => {
+        this.sectionTimeRemaining[sec.id] = (sec.duration_minutes || 60) * 60;
+      });
+    }
 
     const storageKey = `cbt_attempt_${testId}_${window.AppState.user.id}`;
     const savedState = localStorage.getItem(storageKey);
@@ -282,6 +292,7 @@ window.Exam = {
         this.currentSectionIndex = parsed.currentSectionIndex || 0;
         this.currentQuestionIndex = parsed.currentQuestionIndex || 0;
         this.sectionTimeRemaining = parsed.sectionTimeRemaining || this.sectionTimeRemaining;
+        if (parsed.globalTimeRemaining !== undefined) this.globalTimeRemaining = parsed.globalTimeRemaining;
         this.attemptId = parsed.attemptId;
       } catch (e) {
         await this.initNewAttempt(test);
@@ -293,7 +304,7 @@ window.Exam = {
     window.onbeforeunload = () => "Your exam answers might not be submitted if you leave now.";
 
     this.renderExamInterface(container);
-    this.startSectionTimer();
+    this.startGlobalOrSectionTimer();
   },
 
   shufflePreservingGroups(questions) {
@@ -351,6 +362,7 @@ window.Exam = {
       currentSectionIndex: this.currentSectionIndex,
       currentQuestionIndex: this.currentQuestionIndex,
       sectionTimeRemaining: this.sectionTimeRemaining,
+      globalTimeRemaining: this.globalTimeRemaining,
       attemptId: this.attemptId
     }));
   },
@@ -363,7 +375,7 @@ window.Exam = {
     window.showModal({
       title: 'Progress Saved',
       bodyHtml: `
-        <p>Your exam progress, answers, and remaining section time have been saved safely.</p>
+        <p>Your exam progress, answers, and remaining time have been saved safely.</p>
         <p style="margin-top:8px; font-size:0.9rem; color:var(--text-secondary);">
           You can resume anytime by returning to <strong>Take Test</strong> and entering key: 
           <strong style="color:var(--primary-accent); font-family:monospace;">${this.currentTest.test_key}</strong>.
@@ -378,7 +390,6 @@ window.Exam = {
 
   renderExamInterface(container) {
     const activeSec = this.sections[this.currentSectionIndex];
-    const isLastSection = this.currentSectionIndex === this.sections.length - 1;
 
     container.innerHTML = `
       <div class="exam-layout" style="position:relative;">
@@ -395,7 +406,7 @@ window.Exam = {
           <div class="exam-header">
             <div>
               <strong style="font-size:1.1rem;">${this.currentTest.title}</strong>
-              <div id="section-nav-tabs" style="margin-top:8px; display:flex; gap:8px;"></div>
+              <div id="section-nav-tabs" style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"></div>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
               <button class="btn-secondary" style="padding:6px 10px; font-size:0.85rem;" onclick="Exam.pauseTest()">☕ Break</button>
@@ -414,13 +425,7 @@ window.Exam = {
             <div style="display:flex; gap:8px;">
               <button class="btn-secondary" onclick="Exam.prevQuestion()">Previous</button>
               <button class="btn-primary" onclick="Exam.saveAndNext()">Save & Next</button>
-              ${isLastSection ? `
-                <button class="btn-danger" style="margin-left:12px;" onclick="Exam.confirmSubmissionDialog()">Submit Final Exam</button>
-              ` : `
-                <button class="btn-secondary" style="margin-left:12px; background:var(--accent-soft); border-color:var(--primary-accent); color:var(--primary-accent); font-weight:700;" onclick="Exam.confirmAdvanceSection()">
-                  Submit Section & Next ➔
-                </button>
-              `}
+              <button class="btn-danger" style="margin-left:12px;" onclick="Exam.confirmSubmissionDialog()">Submit Final Exam</button>
             </div>
           </div>
         </div>
@@ -446,23 +451,14 @@ window.Exam = {
 
     tabsContainer.innerHTML = this.sections.map((sec, idx) => {
       const isActive = idx === this.currentSectionIndex;
-      const isPast = idx < this.currentSectionIndex;
-      const isFuture = idx > this.currentSectionIndex;
-      const canSwitch = sec.allow_switching === true;
-
-      let style = 'padding:4px 10px; border-radius:4px; font-size:0.85rem; font-weight:600; cursor:default;';
+      let style = 'padding:4px 10px; border-radius:4px; font-size:0.85rem; font-weight:600; cursor:pointer;';
       if (isActive) {
         style += 'background:var(--primary-accent); color:#fff;';
-      } else if (isPast) {
-        style += 'background:#e2e8f0; color:#64748b; text-decoration:line-through;';
-      } else if (isFuture && !canSwitch) {
-        style += 'background:#f1f5f9; color:#94a3b8; border:1px dashed #cbd5e1;';
       } else {
-        style += 'background:#fff; border:1px solid #cbd5e1; color:#0f172a; cursor:pointer;';
+        style += 'background:#fff; border:1px solid #cbd5e1; color:#0f172a;';
       }
 
-      const clickHandler = (canSwitch && !isPast) ? `onclick="Exam.switchSection(${idx})"` : '';
-      return `<div style="${style}" ${clickHandler}>${sec.title} ${isPast ? '✓' : ''}</div>`;
+      return `<div style="${style}" onclick="Exam.switchSection(${idx})">${sec.title}</div>`;
     }).join('');
   },
 
@@ -592,6 +588,10 @@ window.Exam = {
     if (this.currentQuestionIndex < activeQuestions.length - 1) {
       this.currentQuestionIndex++;
       this.renderCurrentQuestion();
+    } else if (this.currentSectionIndex < this.sections.length - 1) {
+      this.currentSectionIndex++;
+      this.currentQuestionIndex = 0;
+      this.renderExamInterface(document.getElementById('app-root'));
     }
   },
 
@@ -600,6 +600,11 @@ window.Exam = {
     if (this.currentQuestionIndex > 0) {
       this.currentQuestionIndex--;
       this.renderCurrentQuestion();
+    } else if (this.currentSectionIndex > 0) {
+      this.currentSectionIndex--;
+      const prevSecQuestions = this.questionsBySection[this.currentSectionIndex];
+      this.currentQuestionIndex = prevSecQuestions.length - 1;
+      this.renderExamInterface(document.getElementById('app-root'));
     }
   },
 
@@ -608,13 +613,7 @@ window.Exam = {
     const q = this.questionsBySection[this.currentSectionIndex][this.currentQuestionIndex];
     this.reviewMarked[q.id] = true;
     this.saveLocalProgress();
-    const activeQuestions = this.questionsBySection[this.currentSectionIndex];
-    if (this.currentQuestionIndex < activeQuestions.length - 1) {
-      this.currentQuestionIndex++;
-      this.renderCurrentQuestion();
-    } else {
-      this.renderPalette();
-    }
+    this.saveAndNext();
   },
 
   jumpToQuestion(idx) {
@@ -624,50 +623,9 @@ window.Exam = {
   },
 
   switchSection(newSecIndex) {
-    const targetSec = this.sections[newSecIndex];
-    if (!targetSec.allow_switching && newSecIndex !== this.currentSectionIndex) {
-      window.showToast('Section switching is locked for this exam.', 'warning');
-      return;
-    }
     this.currentSectionIndex = newSecIndex;
     this.currentQuestionIndex = 0;
     this.renderExamInterface(document.getElementById('app-root'));
-    this.startSectionTimer();
-  },
-
-  confirmAdvanceSection() {
-    const currentSec = this.sections[this.currentSectionIndex];
-    if (currentSec.auto_advance === false) {
-      window.showToast('Early section submission is disabled. You must wait for the section timer to finish.', 'warning');
-      return;
-    }
-
-    const nextSec = this.sections[this.currentSectionIndex + 1];
-    window.showModal({
-      title: `Submit ${currentSec.title}?`,
-      bodyHtml: `
-        <p>Are you sure you want to finish <strong>${currentSec.title}</strong>?</p>
-        <p style="margin-top:8px; color:var(--danger); font-size:0.9rem;">
-          ⚠️ <strong>Notice:</strong> Once you advance to ${nextSec.title}, you CANNOT return to ${currentSec.title}.
-        </p>
-      `,
-      confirmText: `Yes, Proceed to ${nextSec.title}`,
-      onConfirm: () => {
-        this.advanceToNextSection();
-      }
-    });
-  },
-
-  advanceToNextSection() {
-    if (this.currentSectionIndex < this.sections.length - 1) {
-      this.currentSectionIndex++;
-      this.currentQuestionIndex = 0;
-      this.renderExamInterface(document.getElementById('app-root'));
-      this.startSectionTimer();
-      window.showToast(`Started ${this.sections[this.currentSectionIndex].title}`, 'info');
-    } else {
-      this.submitExam();
-    }
   },
 
   renderPalette() {
@@ -721,34 +679,37 @@ window.Exam = {
     }
   },
 
-  startSectionTimer() {
+  startGlobalOrSectionTimer() {
     clearInterval(this.timerInterval);
-    const activeSec = this.sections[this.currentSectionIndex];
     const timerElem = document.getElementById('exam-timer');
 
     this.timerInterval = setInterval(() => {
       if (this.isPaused) return;
 
-      this.sectionTimeRemaining[activeSec.id]--;
-      this.saveLocalProgress();
-
-      const remaining = this.sectionTimeRemaining[activeSec.id];
-
-      if (remaining <= 0) {
-        clearInterval(this.timerInterval);
-        if (this.currentSectionIndex < this.sections.length - 1) {
-          window.showModal({
-            title: `${activeSec.title} Time Expired`,
-            bodyHtml: `<p>Time allocated for <strong>${activeSec.title}</strong> has ended. Advancing to the next section now.</p>`,
-            confirmText: 'Continue',
-            onConfirm: () => this.advanceToNextSection()
-          });
-        } else {
+      if (this.isGlobalTimer) {
+        this.globalTimeRemaining--;
+        this.saveLocalProgress();
+        if (this.globalTimeRemaining <= 0) {
+          clearInterval(this.timerInterval);
           window.showToast('Exam time expired! Submitting your test...', 'warning');
           this.submitExam();
+          return;
         }
-        return;
+      } else {
+        const activeSec = this.sections[this.currentSectionIndex];
+        if (activeSec && this.sectionTimeRemaining[activeSec.id] !== undefined) {
+          this.sectionTimeRemaining[activeSec.id]--;
+          this.saveLocalProgress();
+          if (this.sectionTimeRemaining[activeSec.id] <= 0) {
+            clearInterval(this.timerInterval);
+            window.showToast(`Time expired for ${activeSec.title}!`, 'warning');
+            this.submitExam();
+            return;
+          }
+        }
       }
+
+      const remaining = this.isGlobalTimer ? this.globalTimeRemaining : this.sectionTimeRemaining[this.sections[this.currentSectionIndex].id];
 
       const hrs = Math.floor(remaining / 3600);
       const mins = Math.floor((remaining % 3600) / 60);
@@ -777,7 +738,7 @@ window.Exam = {
     this.isPaused = false;
     const overlay = document.getElementById('exam-pause-overlay');
     if (overlay) overlay.style.display = 'none';
-    this.startSectionTimer();
+    this.startGlobalOrSectionTimer();
   },
 
   confirmSubmissionDialog() {
@@ -808,7 +769,7 @@ window.Exam = {
   async submitExam() {
     clearInterval(this.timerInterval);
     window.onbeforeunload = null;
-    window.showLoading('Evaluating Exam...', 'Grading sections, calculating sectional cutoffs, and finalizing result...');
+    window.showLoading('Evaluating Exam...', 'Grading sections, calculating scores, and finalizing result...');
 
     const storageKey = `cbt_attempt_${this.currentTest.id}_${window.AppState.user.id}`;
     localStorage.removeItem(storageKey);
@@ -877,8 +838,7 @@ window.Exam = {
         });
       } else {
         incorrectCount++;
-        // GATE rule: MSQ and NAT generally have 0 negative marking unless explicitly defined, but we apply section negative marking rule for MCQ/MSQ/NAT
-        const appliedNeg = (qType === 'MSQ') ? 0 : marksIncorrect; 
+        const appliedNeg = marksIncorrect; // Respects 0.0 negative marking if host set it to 0
         totalScore -= appliedNeg;
         answerInserts.push({
           attempt_id: this.attemptId,
@@ -909,7 +869,7 @@ window.Exam = {
           incorrect_count: incorrectCount,
           unattempted_count: unattemptedCount,
           accuracy_percentage: accuracy,
-          time_taken_seconds: this.currentTest.duration_minutes * 60,
+          time_taken_seconds: (this.currentTest.duration_minutes || 180) * 60,
           is_passed: isOverallPassed
         })
         .eq('id', this.attemptId);
