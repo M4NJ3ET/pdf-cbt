@@ -22,7 +22,7 @@ window.Host = {
         <div id="drop-zone" style="border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: pointer; background: var(--bg-muted); margin-bottom: 20px;">
           <div style="font-size: 2.2rem; margin-bottom: 8px;">📄</div>
           <p style="font-weight: 600; margin-bottom: 4px;">Click to browse or drop PDF here</p>
-          <p style="font-size: 0.85rem; color: var(--text-secondary);">Supports multi-section question papers and linked statement questions</p>
+          <p style="font-size: 0.85rem; color: var(--text-secondary);">Supports MCQ, MSQ, NAT question types and sections</p>
           <input type="file" id="pdf-input" accept="application/pdf" style="display: none;" />
         </div>
 
@@ -80,7 +80,7 @@ window.Host = {
         try {
           const parsed = await PdfParser.parseFile(file, (percent) => {
             progressBar.style.width = percent + '%';
-            statusLabel.innerText = `Parsing sections, linked groups & questions... ${percent}%`;
+            statusLabel.innerText = `Parsing sections, question types & answers... ${percent}%`;
           });
 
           parsed.originalFile = file;
@@ -109,6 +109,7 @@ window.Host = {
     const questions = questionsRaw.map((q, idx) => {
       const qText = q.question_text || q.question || q.text || '';
       const section = q.section || q.section_name || 'General';
+      const qType = q.question_type || (q.correct_option_indexes && q.correct_option_indexes.length > 1 ? 'MSQ' : (q.correct_numeric_min !== null && q.correct_numeric_min !== undefined ? 'NAT' : 'MCQ'));
 
       let opts = [];
       if (Array.isArray(q.options)) {
@@ -117,20 +118,39 @@ window.Host = {
         const keys = Object.keys(q.options).sort();
         opts = keys.map(k => String(q.options[k]).trim());
       }
-      while (opts.length < 4) {
-        opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
+
+      if (qType !== 'NAT') {
+        while (opts.length < 4) {
+          opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
+        }
       }
 
       let correctIdx = 0;
-      if (typeof q.correct_option_index === 'number') {
-        correctIdx = q.correct_option_index;
-      } else if (q.correct_answer !== undefined && q.correct_answer !== null) {
-        const ansStr = String(q.correct_answer).trim().toUpperCase();
-        if (charMap[ansStr] !== undefined) {
-          correctIdx = charMap[ansStr];
-        } else if (!isNaN(parseInt(ansStr))) {
-          correctIdx = Math.max(0, parseInt(ansStr) - 1);
+      let correctIdxs = [];
+      let numMin = q.correct_numeric_min !== undefined ? q.correct_numeric_min : null;
+      let numMax = q.correct_numeric_max !== undefined ? q.correct_numeric_max : null;
+
+      if (qType === 'MSQ') {
+        correctIdxs = q.correct_option_indexes || [0];
+        correctIdx = correctIdxs[0];
+      } else if (qType === 'NAT') {
+        if (numMin === null && q.correct_answer !== undefined) {
+          const val = parseFloat(q.correct_answer);
+          numMin = val;
+          numMax = val;
         }
+      } else {
+        if (typeof q.correct_option_index === 'number') {
+          correctIdx = q.correct_option_index;
+        } else if (q.correct_answer !== undefined && q.correct_answer !== null) {
+          const ansStr = String(q.correct_answer).trim().toUpperCase();
+          if (charMap[ansStr] !== undefined) {
+            correctIdx = charMap[ansStr];
+          } else if (!isNaN(parseInt(ansStr))) {
+            correctIdx = Math.max(0, parseInt(ansStr) - 1);
+          }
+        }
+        correctIdxs = [correctIdx];
       }
 
       return {
@@ -140,7 +160,11 @@ window.Host = {
         shared_context: q.shared_context || '',
         question_text: qText.trim(),
         options: opts,
+        question_type: qType,
         correct_option_index: correctIdx,
+        correct_option_indexes: correctIdxs,
+        correct_numeric_min: numMin,
+        correct_numeric_max: numMax,
         explanation: q.explanation || ''
       };
     });
@@ -209,7 +233,11 @@ window.Host = {
           shared_context: '',
           question_text: 'Enter your question text here',
           options: ['Option A', 'Option B', 'Option C', 'Option D'],
+          question_type: 'MCQ',
           correct_option_index: 0,
+          correct_option_indexes: [0],
+          correct_numeric_min: null,
+          correct_numeric_max: null,
           explanation: ''
         }
       ]
@@ -260,8 +288,11 @@ window.Host = {
           .sort((a, b) => a.option_index - b.option_index)
           .map(o => o.option_text);
 
-        while (opts.length < 4) {
-          opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
+        const qType = q.question_type || 'MCQ';
+        if (qType !== 'NAT') {
+          while (opts.length < 4) {
+            opts.push(`Option ${String.fromCharCode(65 + opts.length)}`);
+          }
         }
 
         return {
@@ -271,7 +302,11 @@ window.Host = {
           shared_context: sharedContext,
           question_text: qText,
           options: opts,
+          question_type: qType,
           correct_option_index: q.correct_option_index || 0,
+          correct_option_indexes: q.correct_option_indexes || [q.correct_option_index || 0],
+          correct_numeric_min: q.correct_numeric_min !== undefined ? q.correct_numeric_min : null,
+          correct_numeric_max: q.correct_numeric_max !== undefined ? q.correct_numeric_max : null,
           explanation: q.explanation || ''
         };
       });
@@ -307,7 +342,6 @@ window.Host = {
       return;
     }
 
-    // Fetch existing folders for the dropdown
     const { data: folders } = await window.sb.from('folders').select('*').order('name');
     const folderList = folders || [];
 
@@ -325,15 +359,72 @@ window.Host = {
 
     let qHtml = draft.questions.map((q, qIndex) => {
       const isGrouped = !!q.group_id;
+      const qType = q.question_type || 'MCQ';
+
+      let answerConfigHtml = '';
+      if (qType === 'NAT') {
+        answerConfigHtml = `
+          <div class="form-row" style="margin-top:10px;">
+            <div class="form-group">
+              <label>Min Acceptable Range (NAT)</label>
+              <input type="number" step="any" value="${q.correct_numeric_min !== null ? q.correct_numeric_min : ''}" onchange="Host.updateNatMin(${qIndex}, this.value)" />
+            </div>
+            <div class="form-group">
+              <label>Max Acceptable Range (NAT)</label>
+              <input type="number" step="any" value="${q.correct_numeric_max !== null ? q.correct_numeric_max : ''}" onchange="Host.updateNatMax(${qIndex}, this.value)" />
+            </div>
+          </div>
+        `;
+      } else if (qType === 'MSQ') {
+        answerConfigHtml = `
+          <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Check ALL Correct Answers for MSQ)</label>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+            ${(q.options || []).map((opt, oIndex) => {
+              const isChecked = (q.correct_option_indexes || []).includes(oIndex);
+              return `
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <input type="checkbox" style="width:20px; height:20px;" ${isChecked ? 'checked' : ''} onchange="Host.toggleMsqOption(${qIndex},${oIndex}, this.checked)">
+                  <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
+                  <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+                </div>
+              `;
+            }).join('')}
+          </div>
+          <button class="btn-secondary" style="font-size:0.85rem; padding:4px 10px; margin-bottom:12px;" onclick="Host.addOption(${qIndex})">+ Add Option</button>
+        `;
+      } else {
+        answerConfigHtml = `
+          <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Select ONE Correct Answer for MCQ)</label>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+            ${(q.options || []).map((opt, oIndex) => `
+              <div style="display:flex; align-items:center; gap:10px;">
+                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex},${oIndex})">
+                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex},${oIndex}, this.value)" />
+                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex},${oIndex})">✕</button>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn-secondary" style="font-size:0.85rem; padding:4px 10px; margin-bottom:12px;" onclick="Host.addOption(${qIndex})">+ Add Option</button>
+        `;
+      }
+
       return `
         <div class="card" style="margin-bottom:16px; ${isGrouped ? 'border-left: 4px solid var(--primary-accent);' : ''}" id="q-card-${qIndex}">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <div>
               <span style="font-weight:700;">Question #${qIndex + 1}</span>
               <span style="font-size:0.8rem; background:var(--accent-soft); color:var(--primary-accent); padding:2px 6px; border-radius:4px; margin-left:8px;">${q.section || 'General'}</span>
-              ${isGrouped ? `<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:600;">🔗 Linked Group</span>` : ''}
+              <span style="font-size:0.8rem; background:#f1f5f9; color:#0f172a; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:700;">${qType}</span>
+              ${isGrouped ? `<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:600;">🔗 Linked</span>` : ''}
             </div>
-            <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteQuestion(${qIndex})">Delete</button>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <select style="padding:3px 6px; font-size:0.8rem;" onchange="Host.changeQuestionType(${qIndex}, this.value)">
+                <option value="MCQ" ${qType === 'MCQ' ? 'selected' : ''}>MCQ (Single)</option>
+                <option value="MSQ" ${qType === 'MSQ' ? 'selected' : ''}>MSQ (Multiple)</option>
+                <option value="NAT" ${qType === 'NAT' ? 'selected' : ''}>NAT (Numeric)</option>
+              </select>
+              <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteQuestion(${qIndex})">Delete</button>
+            </div>
           </div>
 
           ${isGrouped ? `
@@ -353,17 +444,7 @@ window.Host = {
             <input type="text" value="${q.section || 'General'}" onchange="Host.updateQSection(${qIndex}, this.value)" />
           </div>
 
-          <label style="font-size:0.9rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">Options (Select Correct Answer)</label>
-          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
-            ${(q.options || []).map((opt, oIndex) => `
-              <div style="display:flex; align-items:center; gap:10px;">
-                <input type="radio" name="correct-${qIndex}" style="width:20px; height:20px;" ${q.correct_option_index === oIndex ? 'checked' : ''} onchange="Host.setCorrectOption(${qIndex}, ${oIndex})">
-                <input type="text" value="${opt}" onchange="Host.updateOptionText(${qIndex}, ${oIndex}, this.value)" />
-                <button class="btn-secondary" style="padding:6px 10px;" onclick="Host.removeOption(${qIndex}, ${oIndex})">✕</button>
-              </div>
-            `).join('')}
-          </div>
-          <button class="btn-secondary" style="font-size:0.85rem; padding:4px 10px; margin-bottom:12px;" onclick="Host.addOption(${qIndex})">+ Add Option</button>
+          ${answerConfigHtml}
 
           <div class="form-group">
             <label>Explanation / Solution</label>
@@ -379,7 +460,7 @@ window.Host = {
           <h2>${isEditing ? '✏️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>
           ${isEditing ? `<span style="background:#e0f2fe; color:#0369a1; padding:4px 12px; border-radius:14px; font-weight:700; font-size:0.85rem;">Editing Existing Test</span>` : ''}
         </div>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Review detected questions, assign a folder, and configure section rules below.</p>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Review question types (MCQ, MSQ, NAT), verify answer keys, and set section-specific marking below.</p>
 
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question</button>
@@ -388,10 +469,10 @@ window.Host = {
 
         <div>${qHtml}</div>
 
-        <!-- Sectional Configuration Form -->
+        <!-- Sectional Configuration Form with Per-Section Marking -->
         <div class="card" id="settings-anchor" style="margin-top:40px; background:var(--bg-muted);">
           <h3 style="margin-bottom:8px;">Exam & Section Configuration</h3>
-          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Assign to a folder and configure timings.</p>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Set individual durations, cutoffs, and section-specific marking rules.</p>
 
           <form id="exam-config-form">
             <div class="form-row">
@@ -410,9 +491,9 @@ window.Host = {
               </div>
             </div>
 
-            <!-- Section-Wise Setup Table -->
+            <!-- Section-Wise Setup Table with Custom Negative Marking -->
             <div style="margin:20px 0; background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
-              <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Sectional Rules & Time Limits</h4>
+              <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Section-Specific Rules & Marking Formulas</h4>
               <div style="overflow-x:auto;">
                 <table style="width:100%; border-collapse:collapse; font-size:0.9rem; text-align:left;">
                   <thead>
@@ -420,40 +501,42 @@ window.Host = {
                       <th style="padding:8px;">Section</th>
                       <th style="padding:8px;">Questions</th>
                       <th style="padding:8px;">Duration (Mins)</th>
-                      <th style="padding:8px;">Cutoff Score</th>
-                      <th style="padding:8px;">Allow Switch?</th>
-                      <th style="padding:8px;">Early Submit?</th>
+                      <th style="padding:8px;">Correct (+Marks)</th>
+                      <th style="padding:8px;">Incorrect (-Marks)</th>
+                      <th style="padding:8px;">Cutoff</th>
+                      <th style="padding:8px;">Lock</th>
                     </tr>
                   </thead>
                   <tbody>
                     ${uniqueSecs.map((sec, sIdx) => {
                       const count = draft.questions.filter(q => (q.section || 'General').trim() === sec).length;
                       const ex = existingSecMap[sec] || {};
-                      const durVal = ex.duration_minutes || (sIdx === 0 ? 60 : 60);
+                      const durVal = ex.duration_minutes || 60;
+                      const correctVal = ex.marks_correct !== undefined ? ex.marks_correct : 1.0;
+                      const incorrectVal = ex.marks_incorrect !== undefined ? ex.marks_incorrect : 0.33;
                       const cutVal = ex.cutoff_score || 0;
                       const switchVal = ex.allow_switching ? 'true' : 'false';
-                      const earlyVal = ex.auto_advance !== false ? 'true' : 'false';
 
                       return `
                         <tr style="border-bottom:1px solid var(--border-color);">
                           <td style="padding:10px 8px;"><strong>${sec}</strong></td>
                           <td style="padding:10px 8px;">${count}</td>
                           <td style="padding:10px 8px;">
-                            <input type="number" id="sec-time-${sIdx}" value="${durVal}" min="1" required style="width:90px;" />
+                            <input type="number" id="sec-time-${sIdx}" value="${durVal}" min="1" required style="width:80px;" />
                           </td>
                           <td style="padding:10px 8px;">
-                            <input type="number" id="sec-cutoff-${sIdx}" value="${cutVal}" min="0" step="0.5" style="width:80px;" />
+                            <input type="number" step="0.25" id="sec-correct-${sIdx}" value="${correctVal}" required style="width:75px;" />
                           </td>
                           <td style="padding:10px 8px;">
-                            <select id="sec-switch-${sIdx}" style="width:110px;">
+                            <input type="number" step="0.01" id="sec-incorrect-${sIdx}" value="${incorrectVal}" required style="width:75px;" />
+                          </td>
+                          <td style="padding:10px 8px;">
+                            <input type="number" step="0.5" id="sec-cutoff-${sIdx}" value="${cutVal}" min="0" style="width:75px;" />
+                          </td>
+                          <td style="padding:10px 8px;">
+                            <select id="sec-switch-${sIdx}" style="width:100px;">
                               <option value="false" ${switchVal === 'false' ? 'selected' : ''}>🔒 Locked</option>
-                              <option value="true" ${switchVal === 'true' ? 'selected' : ''}>🔓 Allowed</option>
-                            </select>
-                          </td>
-                          <td style="padding:10px 8px;">
-                            <select id="sec-early-${sIdx}" style="width:120px;">
-                              <option value="true" ${earlyVal === 'true' ? 'selected' : ''}>✅ Enabled</option>
-                              <option value="false" ${earlyVal === 'false' ? 'selected' : ''}>⏳ Wait Timer</option>
+                              <option value="true" ${switchVal === 'true' ? 'selected' : ''}>🔓 Free</option>
                             </select>
                           </td>
                         </tr>
@@ -462,22 +545,9 @@ window.Host = {
                   </tbody>
                 </table>
               </div>
-            </div>
-
-            <!-- Marking Scheme -->
-            <div class="form-row">
-              <div class="form-group">
-                <label>Marks for Correct</label>
-                <input type="number" step="0.01" id="cfg-marks-correct" value="1.0" required />
-              </div>
-              <div class="form-group">
-                <label>Negative Marks for Wrong</label>
-                <input type="number" step="0.01" id="cfg-marks-incorrect" value="0.25" required />
-              </div>
-              <div class="form-group">
-                <label>Marks for Unattempted</label>
-                <input type="number" step="0.01" id="cfg-marks-unatt" value="0" required />
-              </div>
+              <p style="font-size:0.82rem; color:var(--text-secondary); margin-top:10px;">
+                💡 <strong>Incorrect (-Marks)</strong> allows setting GATE ratios like <code>0.33</code> (for -1/3), <code>0.25</code> (for -1/4), or <code>0</code> for zero negative marking.
+              </p>
             </div>
 
             <div class="form-row">
@@ -522,6 +592,21 @@ window.Host = {
   },
   updateQGroupContext(idx, val) { window.AppState.parsedExamDraft.questions[idx].shared_context = val; },
   setCorrectOption(qIdx, oIdx) { window.AppState.parsedExamDraft.questions[qIdx].correct_option_index = oIdx; },
+  toggleMsqOption(qIdx, oIdx, isChecked) {
+    let list = window.AppState.parsedExamDraft.questions[qIdx].correct_option_indexes || [];
+    if (isChecked) {
+      if (!list.includes(oIdx)) list.push(oIdx);
+    } else {
+      list = list.filter(i => i !== oIdx);
+    }
+    window.AppState.parsedExamDraft.questions[qIdx].correct_option_indexes = list;
+  },
+  updateNatMin(qIdx, val) { window.AppState.parsedExamDraft.questions[qIdx].correct_numeric_min = val !== '' ? parseFloat(val) : null; },
+  updateNatMax(qIdx, val) { window.AppState.parsedExamDraft.questions[qIdx].correct_numeric_max = val !== '' ? parseFloat(val) : null; },
+  changeQuestionType(qIdx, newType) {
+    window.AppState.parsedExamDraft.questions[qIdx].question_type = newType;
+    Host.renderReview();
+  },
   updateOptionText(qIdx, oIdx, val) { window.AppState.parsedExamDraft.questions[qIdx].options[oIdx] = val; },
   updateExplanation(idx, val) { window.AppState.parsedExamDraft.questions[idx].explanation = val; },
   deleteQuestion(idx) {
@@ -544,21 +629,22 @@ window.Host = {
       shared_context: '',
       question_text: 'New Question Text',
       options: ['Option A', 'Option B', 'Option C', 'Option D'],
+      question_type: 'MCQ',
       correct_option_index: 0,
+      correct_option_indexes: [0],
+      correct_numeric_min: null,
+      correct_numeric_max: null,
       explanation: ''
     });
     Host.renderReview();
   },
 
-  // 4. Save into Supabase
+  // 4. Save into Supabase with Question Types & Section Marking
   async saveAndPublishExam(uniqueSecs) {
     const draft = window.AppState.parsedExamDraft;
     const isEditing = !!this.editingTestId;
     const title = document.getElementById('cfg-title').value.trim();
     const folderId = document.getElementById('cfg-folder').value || null;
-    const marksCorrect = parseFloat(document.getElementById('cfg-marks-correct').value);
-    const marksIncorrect = parseFloat(document.getElementById('cfg-marks-incorrect').value);
-    const marksUnatt = parseFloat(document.getElementById('cfg-marks-unatt').value);
     const passType = document.getElementById('cfg-pass-type').value;
     const passScore = parseFloat(document.getElementById('cfg-pass-score').value);
     const shuffleQ = document.getElementById('cfg-shuffle-q').checked;
@@ -566,9 +652,10 @@ window.Host = {
     let totalExamDuration = 0;
     const sectionsConfig = uniqueSecs.map((secName, sIdx) => {
       const dur = parseInt(document.getElementById(`sec-time-${sIdx}`).value) || 60;
+      const correctM = parseFloat(document.getElementById(`sec-correct-${sIdx}`).value) || 1.0;
+      const incorrectM = parseFloat(document.getElementById(`sec-incorrect-${sIdx}`).value) || 0.33;
       const cut = parseFloat(document.getElementById(`sec-cutoff-${sIdx}`).value) || 0;
       const allowSwitch = document.getElementById(`sec-switch-${sIdx}`).value === 'true';
-      const earlySubmit = document.getElementById(`sec-early-${sIdx}`).value === 'true';
       totalExamDuration += dur;
       return {
         title: secName,
@@ -576,16 +663,16 @@ window.Host = {
         duration_minutes: dur,
         cutoff_score: cut,
         allow_switching: allowSwitch,
-        auto_advance: earlySubmit,
-        marks_correct: marksCorrect,
-        marks_incorrect: marksIncorrect,
-        marks_unattempted: marksUnatt
+        auto_advance: true,
+        marks_correct: correctM,
+        marks_incorrect: incorrectM,
+        marks_unattempted: 0
       };
     });
 
     window.showLoading(
       isEditing ? 'Updating Exam Paper...' : 'Publishing Exam...',
-      'Saving sectional rules, updating questions, and configuring settings...'
+      'Saving sectional marking formulas, question types, and configuration...'
     );
 
     try {
@@ -684,7 +771,7 @@ window.Host = {
       const secMap = {};
       insertedSections.forEach(s => { secMap[s.title] = s.id; });
 
-      // Insert Questions
+      // Insert Questions with Question Type parameters
       for (let qIdx = 0; qIdx < draft.questions.length; qIdx++) {
         const q = draft.questions[qIdx];
         const secId = secMap[(q.section || 'General').trim()] || insertedSections[0].id;
@@ -701,13 +788,17 @@ window.Host = {
             section_id: secId,
             order_index: qIdx,
             question_text: formattedQuestionText,
-            correct_option_index: q.correct_option_index,
+            question_type: q.question_type || 'MCQ',
+            correct_option_index: q.correct_option_index || 0,
+            correct_option_indexes: q.correct_option_indexes || [q.correct_option_index || 0],
+            correct_numeric_min: q.correct_numeric_min,
+            correct_numeric_max: q.correct_numeric_max,
             explanation: q.explanation
           })
           .select()
           .single();
 
-        if (qRecord && q.options && q.options.length > 0) {
+        if (qRecord && q.question_type !== 'NAT' && q.options && q.options.length > 0) {
           const optPayload = q.options.map((optText, oIdx) => ({
             question_id: qRecord.id,
             option_index: oIdx,
@@ -725,8 +816,7 @@ window.Host = {
       const portalUrl = `https://mockorbit-cbt.vercel.app`;
       const shareMessage = `📝 *MockOrbit CBT Practice Exam Invitation*\n\n` +
         `📌 *Exam:* ${title}\n` +
-        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}: ${s.duration_minutes}m`).join(' | ')})\n` +
-        `🎯 *Marking:* +${marksCorrect} / -${marksIncorrect}\n\n` +
+        `⏱️ *Total Duration:* ${totalExamDuration} mins (${sectionsConfig.map(s => `${s.title}:${s.duration_minutes}m`).join(' | ')})\n\n` +
         `🔑 *Test Key:* ${code}\n` +
         `🔗 *Direct Test Link:* ${examUrl}\n\n` +
         `Login and enter the key at: ${portalUrl}`;
@@ -737,7 +827,7 @@ window.Host = {
           <div style="font-size:2.8rem; margin-bottom:8px;">${isEditing ? '💾' : '🎉'}</div>
           <h2>${isEditing ? 'Exam Updated Successfully!' : 'Exam Published Successfully!'}</h2>
           <p style="color:var(--text-secondary); margin-bottom:20px;">
-            ${isEditing ? 'All question edits, section rules, and options have been saved.' : 'Your sectional exam is live. Share the key with candidates:'}
+            ${isEditing ? 'All question types, MSQ keys, and marking rules have been updated.' : 'Your GATE/IOCL sectional exam is live. Share the key with candidates:'}
           </p>
           
           <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
@@ -746,7 +836,7 @@ window.Host = {
 
           <div style="background:var(--bg-muted); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
             <p><strong>Exam Name:</strong> ${title}</p>
-            <p><strong>Sections:</strong> ${sectionsConfig.map(s => `${s.title} (${s.duration_minutes}m)`).join(' → ')}</p>
+            <p><strong>Sections:</strong> ${sectionsConfig.map(s => `${s.title} (${s.duration_minutes}m, +${s.marks_correct}/-${s.marks_incorrect})`).join(' → ')}</p>
             <p><strong>Total Duration:</strong> ${totalExamDuration} Minutes</p>
             <p><strong>Test Key:</strong> <span style="font-family:monospace; font-weight:700; color:var(--primary-accent);">${code}</span></p>
           </div>
@@ -794,30 +884,28 @@ window.Host = {
       window.sb.from('folders').select('*').order('created_at', { ascending: false }),
       window.sb.from('tests').select('id, title, folder_id'),
       window.sb.from('folder_allocations').select('*'),
-      window.sb.from('profiles').select('id, email, full_name, role').eq('role', 'USER').order('email')
+      window.sb.from('profiles').select('id, email, full_name, role').order('email')
     ]);
 
     const folders = foldersRes.data || [];
     const tests = testsRes.data || [];
     const allocations = allocRes.data || [];
-    const students = profRes.data || [];
 
     target.innerHTML = `
       <div style="max-width:1000px; margin:0 auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
           <div>
             <h2>Test Folders & Student Allocations</h2>
-            <p style="color:var(--text-secondary); font-size:0.95rem;">Group your exams into folders (e.g. IOCL, GATE) and allocate entire folders to specific students.</p>
+            <p style="color:var(--text-secondary); font-size:0.95rem;">Group your exams into folders and allocate them directly to students.</p>
           </div>
           <button class="btn-primary" onclick="Host.promptCreateFolder()">+ New Folder</button>
         </div>
 
-        <!-- Folder List -->
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:16px;">
           ${folders.length === 0 ? `
             <div class="card" style="grid-column:1/-1; text-align:center; padding:40px;">
               <h3>No Folders Created Yet</h3>
-              <p style="color:var(--text-secondary); margin:10px 0;">Create a folder like "IOCL Test Series" or "GATE Prep" to group tests and assign them to students.</p>
+              <p style="color:var(--text-secondary); margin:10px 0;">Create a folder like "GATE 2026 Series" to group tests and assign them to students.</p>
               <button class="btn-primary" onclick="Host.promptCreateFolder()">Create First Folder</button>
             </div>
           ` : folders.map(f => {
@@ -836,11 +924,11 @@ window.Host = {
                   </div>
                   <h3 style="margin-bottom:6px;">${f.name}</h3>
                   <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:12px;">
-                    📚 <strong>${folderTests.length}</strong> Tests &nbsp;|&nbsp; 👥 <strong>${folderAllocs.length}</strong> Students Assigned
+                    📚 <strong>${folderTests.length}</strong> Tests &nbsp;\vert{}&nbsp; 👥 <strong>${folderAllocs.length}</strong> Students Assigned
                   </p>
                 </div>
 
-                <div style="border-top:1px solid var(--border-color); padding-top:12px; margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="border-top:1px solid var(--border-color); padding-top:12px; margin-top:8px;">
                   <button class="btn-secondary" style="font-size:0.85rem; padding:6px 12px; width:100%;" onclick="Host.openAllocationModal('${f.id}', '${f.name.replace(/'/g, "\\'")}')">
                     👥 Manage Student Access
                   </button>
@@ -854,7 +942,7 @@ window.Host = {
   },
 
   promptCreateFolder() {
-    const name = prompt('Enter new folder name (e.g. "IOCL Technical Series", "GATE CS"):');
+    const name = prompt('Enter new folder name (e.g. "GATE Test Series"):');
     if (!name || !name.trim()) return;
     this.createFolder(name.trim());
   },
@@ -891,61 +979,39 @@ window.Host = {
   deleteFolder(folderId, folderName) {
     window.showModal({
       title: `Delete Folder "${folderName}"?`,
-      bodyHtml: `
-        <p>Are you sure you want to delete this folder?</p>
-        <p style="margin-top:6px; font-size:0.85rem; color:var(--text-secondary);">
-          Tests inside this folder will <strong>not</strong> be deleted; they will simply become standalone unfiled tests.
-        </p>
-      `,
+      bodyHtml: `<p>Are you sure you want to delete this folder? Tests inside will become unfiled.</p>`,
       confirmText: 'Delete Folder',
       danger: true,
       onConfirm: async () => {
-        const { error } = await window.sb.from('folders').delete().eq('id', folderId);
-        if (error) {
-          window.showToast(error.message, 'error');
-        } else {
-          window.showToast('Folder deleted.', 'success');
-          Host.renderFolderManager();
-        }
+        await window.sb.from('folders').delete().eq('id', folderId);
+        window.showToast('Folder deleted.', 'success');
+        Host.renderFolderManager();
       }
     });
   },
 
   async openAllocationModal(folderId, folderName) {
-    window.showLoading('Loading Students...', 'Fetching candidate list for allocation...');
-
+    window.showLoading('Loading Students...', 'Fetching candidate list...');
     const [studentsRes, allocsRes] = await Promise.all([
-      window.sb.from('profiles').select('id, email, full_name, role').eq('role', 'USER').order('email'),
+      window.sb.from('profiles').select('id, email, full_name, role').order('email'),
       window.sb.from('folder_allocations').select('user_id').eq('folder_id', folderId)
     ]);
-
     window.hideLoading();
 
     const students = studentsRes.data || [];
     const assignedUserIds = new Set((allocsRes.data || []).map(a => a.user_id));
 
-    if (students.length === 0) {
-      window.showToast('No registered candidates found to allocate.', 'warning');
-      return;
-    }
-
     const modalBody = `
       <p style="margin-bottom:12px; font-size:0.9rem; color:var(--text-secondary);">
-        Select which registered candidates should have direct access to tests in <strong>${folderName}</strong> without typing test keys:
+        Select candidates for <strong>${folderName}</strong>:
       </p>
       <div style="max-height:280px; overflow-y:auto; border:1px solid var(--border-color); border-radius:6px; padding:10px; background:var(--bg-muted);">
-        ${students.map(s => {
-          const isChecked = assignedUserIds.has(s.id);
-          return `
-            <label style="display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:4px; cursor:pointer; font-size:0.9rem; transition:background 0.15s;" onmouseover="this.style.background='#fff'" onmouseout="this.style.background='transparent'">
-              <input type="checkbox" class="student-alloc-cb" value="${s.id}" ${isChecked ? 'checked' : ''} style="width:18px; height:18px;" />
-              <div>
-                <strong>${s.full_name || 'No Name'}</strong>
-                <span style="font-size:0.8rem; color:var(--text-secondary); margin-left:6px;">(${s.email})</span>
-              </div>
-            </label>
-          `;
-        }).join('')}
+        ${students.map(s => `
+          <label style="display:flex; align-items:center; gap:10px; padding:6px 8px; cursor:pointer; font-size:0.9rem;">
+            <input type="checkbox" class="student-alloc-cb" value="${s.id}" ${assignedUserIds.has(s.id) ? 'checked' : ''} style="width:18px; height:18px;" />
+            <div><strong>${s.full_name || s.email}</strong> <span style="font-size:0.8rem; color:var(--text-secondary);">(${s.role})</span></div>
+          </label>
+        `).join('')}
       </div>
     `;
 
@@ -954,49 +1020,22 @@ window.Host = {
       bodyHtml: modalBody,
       confirmText: 'Save Allocations',
       onConfirm: async () => {
-        const checkedInputs = document.querySelectorAll('.student-alloc-cb:checked');
-        const selectedUserIds = Array.from(checkedInputs).map(cb => cb.value);
+        const checked = document.querySelectorAll('.student-alloc-cb:checked');
+        const userIds = Array.from(checked).map(cb => cb.value);
 
-        window.showLoading('Saving Allocations...', 'Updating student access records...');
-
-        // 1. Delete previous allocations for this folder
-        const { error: delErr } = await window.sb
-          .from('folder_allocations')
-          .delete()
-          .eq('folder_id', folderId);
-
-        if (delErr) {
-          window.hideLoading();
-          window.showToast('Failed to clear old allocations: ' + delErr.message, 'error');
-          return;
+        window.showLoading('Saving Allocations...', 'Updating access records...');
+        await window.sb.from('folder_allocations').delete().eq('folder_id', folderId);
+        if (userIds.length > 0) {
+          await window.sb.from('folder_allocations').insert(userIds.map(uId => ({ folder_id: folderId, user_id: uId })));
         }
-
-        // 2. Insert new allocations if any are selected
-        if (selectedUserIds.length > 0) {
-          const insertPayload = selectedUserIds.map(uId => ({
-            folder_id: folderId,
-            user_id: uId
-          }));
-
-          const { error: insErr } = await window.sb
-            .from('folder_allocations')
-            .insert(insertPayload);
-
-          if (insErr) {
-            window.hideLoading();
-            window.showToast('Failed to save new allocations: ' + insErr.message, 'error');
-            return;
-          }
-        }
-
         window.hideLoading();
-        window.showToast(`Updated allocations for ${folderName}!`, 'success');
+        window.showToast('Allocations updated successfully!', 'success');
         Host.renderFolderManager();
       }
     });
   },
 
-  // 6. My Tests List (Grouped by Folder)
+  // 6. My Tests List
   async renderMyTests(container) {
     const target = this.getTarget(container);
     if (!target) return;
@@ -1008,66 +1047,34 @@ window.Host = {
       window.sb.from('folders').select('*').order('name')
     ]);
 
-    if (testsRes.error) {
-      target.innerHTML = `<div class="card"><p>Error: ${testsRes.error.message}</p></div>`;
-      return;
-    }
-
     const tests = testsRes.data || [];
     const folders = foldersRes.data || [];
 
-    if (tests.length === 0) {
-      target.innerHTML = `
-        <div class="card" style="text-align:center; padding:40px;">
-          <h3>No Tests Uploaded Yet</h3>
-          <p style="color:var(--text-secondary); margin:12px 0;">Upload your first exam paper to get started.</p>
-          <a href="#/host/upload"><button class="btn-primary">Upload Test</button></a>
-        </div>
-      `;
-      return;
-    }
-
-    // Group tests by folder
     const folderMap = { 'unfiled': { name: 'Standalone / Unfiled Tests', tests: [] } };
-    folders.forEach(f => {
-      folderMap[f.id] = { name: f.name, tests: [] };
-    });
-
+    folders.forEach(f => { folderMap[f.id] = { name: f.name, tests: [] }; });
     tests.forEach(t => {
-      if (t.folder_id && folderMap[t.folder_id]) {
-        folderMap[t.folder_id].tests.push(t);
-      } else {
-        folderMap['unfiled'].tests.push(t);
-      }
+      if (t.folder_id && folderMap[t.folder_id]) folderMap[t.folder_id].tests.push(t);
+      else folderMap['unfiled'].tests.push(t);
     });
 
     const groupsHtml = Object.keys(folderMap).map(fId => {
       const group = folderMap[fId];
       if (group.tests.length === 0) return '';
 
-      const testItems = group.tests.map(t => {
-        const attemptCount = t.attempts && t.attempts[0] ? t.attempts[0].count : 0;
-        const secSummary = t.sections && t.sections.length > 0
-          ? t.sections.map(s => `${s.title} (${s.duration_minutes || t.duration_minutes}m)`).join(', ')
-          : `${t.duration_minutes} min`;
-
-        return `
-          <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:10px;">
-            <div>
-              <h4 style="margin-bottom:4px; font-size:1.05rem;">${t.title}</h4>
-              <p style="color:var(--text-secondary); font-size:0.88rem;">
-                Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Sections: ${secSummary} | Attempts: ${attemptCount}
-              </p>
-            </div>
-            <div style="display:flex; gap:8px;">
-              <button class="btn-primary" style="padding:6px 12px; font-size:0.85rem;" onclick="Host.loadTestForEdit('${t.id}')">✏️ Edit</button>
-              <button class="btn-outline" onclick="navigator.clipboard.writeText('${t.test_key}'); window.showToast('Copied test key!', 'success');">Copy Key</button>
-              <a href="#/instructions/${t.test_key}"><button class="btn-secondary">Preview</button></a>
-              <button class="btn-danger" onclick="Host.deleteTest('${t.id}')">Delete</button>
-            </div>
+      const testItems = group.tests.map(t => `
+        <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:10px;">
+          <div>
+            <h4 style="margin-bottom:4px; font-size:1.05rem;">${t.title}</h4>
+            <p style="color:var(--text-secondary); font-size:0.88rem;">Key: <strong style="color:var(--primary-accent); font-family:monospace;">${t.test_key}</strong> | Duration: ${t.duration_minutes}m</p>
           </div>
-        `;
-      }).join('');
+          <div style="display:flex; gap:8px;">
+            <button class="btn-primary" style="padding:6px 12px; font-size:0.85rem;" onclick="Host.loadTestForEdit('${t.id}')">✏️️ Edit</button>
+            <button class="btn-outline" onclick="navigator.clipboard.writeText('${t.test_key}'); window.showToast('Copied test key!', 'success');">Copy Key</button>
+            <a href="#/instructions/${t.test_key}"><button class="btn-secondary">Preview</button></a>
+            <button class="btn-danger" onclick="Host.deleteTest('${t.id}')">Delete</button>
+          </div>
+        </div>
+      `).join('');
 
       return `
         <div style="margin-bottom:28px;">
@@ -1084,7 +1091,7 @@ window.Host = {
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
           <div>
             <h2>My Uploaded Tests</h2>
-            <p style="color:var(--text-secondary); font-size:0.95rem;">Manage your published tests grouped by their folders.</p>
+            <p style="color:var(--text-secondary); font-size:0.95rem;">Manage published tests grouped by folders.</p>
           </div>
           <div style="display:flex; gap:10px;">
             <a href="#/host/folders"><button class="btn-secondary">📁 Manage Folders</button></a>
@@ -1099,17 +1106,13 @@ window.Host = {
   deleteTest(testId) {
     window.showModal({
       title: 'Delete Test?',
-      bodyHtml: 'Are you sure you want to permanently delete this test? All questions, sections, and candidate attempts will be removed.',
-      confirmText: 'Delete Permanently',
+      bodyHtml: 'Are you sure you want to delete this test?',
+      confirmText: 'Delete',
       danger: true,
       onConfirm: async () => {
-        const { error } = await window.sb.from('tests').delete().eq('id', testId);
-        if (error) {
-          window.showToast(error.message, 'error');
-        } else {
-          window.showToast('Test deleted successfully.', 'success');
-          Host.renderMyTests();
-        }
+        await window.sb.from('tests').delete().eq('id', testId);
+        window.showToast('Test deleted.', 'success');
+        Host.renderMyTests();
       }
     });
   },
@@ -1119,23 +1122,19 @@ window.Host = {
     const target = this.getTarget(container);
     if (!target) return;
 
-    target.innerHTML = `<div class="card"><p>Loading user list...</p></div>`;
-
+    target.innerHTML = `<div class="card"><p>Loading users...</p></div>`;
     const [authRes, profRes] = await Promise.all([
       window.sb.from('authorized_emails').select('*').order('created_at', { ascending: false }),
       window.sb.from('profiles').select('*').order('created_at', { ascending: false })
     ]);
-
     const profiles = profRes.data || [];
 
     target.innerHTML = `
       <div style="max-width:900px; margin:0 auto;">
         <h2>User Access Management</h2>
-        
         <div class="card" style="margin:20px 0;">
           <h3>Authorize New Student Email</h3>
-          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:14px;">Only authorized emails can register on this portal.</p>
-          <form id="add-auth-email-form" style="display:flex; gap:10px; flex-wrap:wrap;">
+          <form id="add-auth-email-form" style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
             <input type="email" id="auth-email-input" placeholder="student@example.com" required style="flex:1; min-width:240px;" />
             <select id="auth-role-input" style="width:140px;">
               <option value="USER">USER</option>
@@ -1144,146 +1143,23 @@ window.Host = {
             <button type="submit" class="btn-primary">Add Authorization</button>
           </form>
         </div>
-
         <div class="card">
           <h3 style="margin-bottom:14px;">Registered Users (${profiles.length})</h3>
-          <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; text-align:left; font-size:0.95rem;">
-              <thead>
-                <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary);">
-                  <th style="padding:10px;">Name / Email</th>
-                  <th style="padding:10px;">Role</th>
-                  <th style="padding:10px; text-align:right;">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${profiles.map(p => `
-                  <tr style="border-bottom:1px solid var(--border-color);">
-                    <td style="padding:10px;">
-                      <strong>${p.full_name || 'No Name'}</strong>
-                      <div style="font-size:0.82rem; color:var(--text-secondary);">${p.email}</div>
-                    </td>
-                    <td style="padding:10px;"><span class="nav-badge">${p.role}</span></td>
-                    <td style="padding:10px; text-align:right;">
-                      <button class="btn-secondary" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.promptPasswordReset('${p.id}', '${p.email}')">Reset Password</button>
-                      <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteUser('${p.id}', '${p.email}')">Remove</button>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById('add-auth-email-form').onsubmit = async (e) => {
-      e.preventDefault();
-      const email = document.getElementById('auth-email-input').value.trim().toLowerCase();
-      const role = document.getElementById('auth-role-input').value;
-
-      const { error } = await window.sb.from('authorized_emails').insert({ email, role });
-      if (error) {
-        window.showToast(error.message, 'error');
-      } else {
-        window.showToast(`Authorized ${email} successfully.`, 'success');
-        Host.renderUserManager();
-      }
-    };
-  },
-
-  promptPasswordReset(userId, email) {
-    const newPwd = prompt(`Enter new password for ${email}:`);
-    if (!newPwd || newPwd.trim().length < 6) {
-      if (newPwd !== null) window.showToast('Password must be at least 6 characters.', 'error');
-      return;
-    }
-    Host.executePasswordReset(userId, newPwd);
-  },
-
-  async executePasswordReset(userId, newPassword) {
-    const { error } = await window.sb.rpc('host_set_user_password', {
-      target_user_id: userId,
-      new_plain_password: newPassword
-    });
-
-    if (error) {
-      window.showToast(error.message, 'error');
-    } else {
-      window.showToast('User password updated successfully.', 'success');
-    }
-  },
-
-  deleteUser(userId, email) {
-    window.showModal({
-      title: 'Remove User?',
-      bodyHtml: `Are you sure you want to remove <strong>${email}</strong>?`,
-      confirmText: 'Remove User',
-      danger: true,
-      onConfirm: async () => {
-        await window.sb.from('authorized_emails').delete().eq('email', email);
-        const { error } = await window.sb.from('profiles').delete().eq('id', userId);
-        if (error) {
-          window.showToast(error.message, 'error');
-        } else {
-          window.showToast('User removed.', 'success');
-          Host.renderUserManager();
-        }
-      }
-    });
-  },
-
-  // 8. View All Candidate Attempts
-  async renderAllHistory(container) {
-    const target = this.getTarget(container);
-    if (!target) return;
-
-    target.innerHTML = `<div class="card"><p>Loading all attempt records...</p></div>`;
-
-    const { data: attempts, error } = await window.sb
-      .from('attempts')
-      .select('*, tests(title, test_key), profiles(email, full_name)')
-      .not('submitted_at', 'is', null)
-      .order('submitted_at', { ascending: false });
-
-    if (error) {
-      target.innerHTML = `<div class="card"><p>Error: ${error.message}</p></div>`;
-      return;
-    }
-
-    target.innerHTML = `
-      <div style="max-width:1100px; margin:0 auto;">
-        <h2>All Candidate Attempts (${attempts.length})</h2>
-        <div class="card" style="margin-top:20px; overflow-x:auto;">
           <table style="width:100%; border-collapse:collapse; text-align:left; font-size:0.95rem;">
             <thead>
               <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary);">
-                <th style="padding:10px;">Candidate</th>
-                <th style="padding:10px;">Exam</th>
-                <th style="padding:10px;">Score</th>
-                <th style="padding:10px;">Status</th>
-                <th style="padding:10px;">Date</th>
+                <th style="padding:10px;">Name / Email</th>
+                <th style="padding:10px;">Role</th>
                 <th style="padding:10px; text-align:right;">Actions</th>
               </tr>
             </thead>
             <tbody>
-              ${attempts.map(a => `
+              ${profiles.map(p => `
                 <tr style="border-bottom:1px solid var(--border-color);">
-                  <td style="padding:10px;">
-                    <strong>${a.profiles?.full_name || 'Student'}</strong>
-                    <div style="font-size:0.82rem; color:var(--text-secondary);">${a.profiles?.email || 'Unknown'}</div>
-                  </td>
-                  <td style="padding:10px;">${a.tests ? a.tests.title : 'Test'}</td>
-                  <td style="padding:10px; font-weight:600;">${a.total_score} /${a.max_score}</td>
-                  <td style="padding:10px;">
-                    <span style="font-weight:700; color:${a.is_passed ? 'var(--success)' : 'var(--danger)'};">
-                      ${a.is_passed ? 'PASS' : 'FAIL'}
-                    </span>
-                  </td>
-                  <td style="padding:10px; color:var(--text-secondary);">${new Date(a.submitted_at).toLocaleDateString()}</td>
+                  <td style="padding:10px;"><strong>${p.full_name || 'No Name'}</strong><div style="font-size:0.82rem; color:var(--text-secondary);">${p.email}</div></td>
+                  <td style="padding:10px;"><span class="nav-badge">${p.role}</span></td>
                   <td style="padding:10px; text-align:right;">
-                    <a href="#/results/${a.id}"><button class="btn-secondary" style="padding:4px 8px; font-size:0.8rem;">Results</button></a>
-                    <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteAttemptRecord('${a.id}')">Delete</button>
+                    <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteUser('${p.id}', '${p.email}')">Remove</button>
                   </td>
                 </tr>
               `).join('')}
@@ -1292,23 +1168,66 @@ window.Host = {
         </div>
       </div>
     `;
+
+    document.getElementById('add-auth-email-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('auth-email-input').value.trim().toLowerCase();
+      const role = document.getElementById('auth-role-input').value;
+      await window.sb.from('authorized_emails').insert({ email, role });
+      window.showToast(`Authorized ${email}!`, 'success');
+      Host.renderUserManager();
+    };
   },
 
-  deleteAttemptRecord(attemptId) {
+  deleteUser(userId, email) {
     window.showModal({
-      title: 'Delete Attempt Record?',
-      bodyHtml: 'Are you sure you want to delete this test attempt? This cannot be undone.',
-      confirmText: 'Delete',
+      title: 'Remove User?',
+      bodyHtml: `Remove <strong>${email}</strong>?`,
+      confirmText: 'Remove',
       danger: true,
       onConfirm: async () => {
-        const { error } = await window.sb.from('attempts').delete().eq('id', attemptId);
-        if (error) {
-          window.showToast(error.message, 'error');
-        } else {
-          window.showToast('Attempt record deleted.', 'success');
-          Host.renderAllHistory();
-        }
+        await window.sb.from('profiles').delete().eq('id', userId);
+        window.showToast('User removed.', 'success');
+        Host.renderUserManager();
       }
     });
+  },
+
+  async renderAllHistory(container) {
+    const target = this.getTarget(container);
+    if (!target) return;
+
+    target.innerHTML = `<div class="card"><p>Loading history...</p></div>`;
+    const { data: attempts } = await window.sb.from('attempts').select('*, tests(title, test_key), profiles(email, full_name)').not('submitted_at', 'is', null).order('submitted_at', { ascending: false });
+
+    target.innerHTML = `
+      <div style="max-width:1100px; margin:0 auto;">
+        <h2>All Candidate Attempts</h2>
+        <div class="card" style="margin-top:20px; overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; text-align:left; font-size:0.95rem;">
+            <thead>
+              <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary);">
+                <th style="padding:10px;">Candidate</th>
+                <th style="padding:10px;">Exam</th>
+                <th style="padding:10px;">Score</th>
+                <th style="padding:10px;">Status</th>
+                <th style="padding:10px; text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(attempts || []).map(a => `
+                <tr style="border-bottom:1px solid var(--border-color);">
+                  <td style="padding:10px;"><strong>${a.profiles?.full_name || 'Student'}</strong><div style="font-size:0.82rem; color:var(--text-secondary);">${a.profiles?.email}</div></td>
+                  <td style="padding:10px;">${a.tests?.title || 'Test'}</td>
+                  <td style="padding:10px; font-weight:600;">${a.total_score} /${a.max_score}</td>
+                  <td style="padding:10px;"><span style="color:${a.is_passed ? 'var(--success)' : 'var(--danger)'}; font-weight:700;">${a.is_passed ? 'PASS' : 'FAIL'}</span></td>
+                  <td style="padding:10px; text-align:right;"><a href="#/results/${a.id}"><button class="btn-secondary" style="padding:4px 8px; font-size:0.8rem;">Results</button></a></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
   }
 };
