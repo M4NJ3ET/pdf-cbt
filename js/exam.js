@@ -138,7 +138,7 @@ window.Exam = {
     }
 
     const sortedSections = (test.sections || []).sort((a, b) => a.order_index - b.order_index);
-    const isGlobal = sortedSections.every(s => s.allow_switching === true);
+    const isGlobal = test.is_global_timer !== false && sortedSections.every(s => s.allow_switching === true);
 
     const storageKey = `cbt_attempt_${test.id}_${window.AppState.user.id}`;
     const savedState = localStorage.getItem(storageKey);
@@ -233,7 +233,7 @@ window.Exam = {
       this.sections = [{ id: 'default', title: 'General', duration_minutes: test.duration_minutes, allow_switching: true, auto_advance: true }];
     }
 
-    this.isGlobalTimer = this.sections.every(s => s.allow_switching === true);
+    this.isGlobalTimer = test.is_global_timer !== false && this.sections.every(s => s.allow_switching === true);
 
     questions.forEach(q => {
       if (q.question_text && q.question_text.startsWith('[SHARED_GROUP:')) {
@@ -394,7 +394,7 @@ window.Exam = {
           <h2 style="font-size:1.8rem; margin-bottom:8px;">Exam Paused</h2>
           <p style="color:var(--text-secondary); max-width:440px; margin-bottom:24px;">The timer has stopped and question content is hidden.</p>
           <button class="btn-primary" style="padding:14px 32px; font-size:1.1rem;" onclick="Exam.resumeTest()">
-            ▶️️ Resume Test
+            ▶️ Resume Test
           </button>
         </div>
 
@@ -485,8 +485,16 @@ window.Exam = {
       </div>
     ` : '';
 
-    // Directly grab the active section's live remaining time
-    const secRem = (!this.isGlobalTimer && activeSec) ? (this.sectionTimeRemaining[activeSec.id] !== undefined ? this.sectionTimeRemaining[activeSec.id] : (activeSec.duration_minutes || 60) * 60) : 0;
+    // Robust calculation of active section remaining time
+    let secRem = 0;
+    if (!this.isGlobalTimer && activeSec) {
+      if (this.sectionTimeRemaining[activeSec.id] !== undefined && !isNaN(this.sectionTimeRemaining[activeSec.id])) {
+        secRem = this.sectionTimeRemaining[activeSec.id];
+      } else {
+        secRem = Number(activeSec.duration_minutes || 60) * 60;
+        this.sectionTimeRemaining[activeSec.id] = secRem;
+      }
+    }
     const shrs = Math.floor(secRem / 3600);
     const smins = Math.floor((secRem % 3600) / 60);
     const ssecs = secRem % 60;
@@ -606,7 +614,7 @@ window.Exam = {
   setNatAnswer(qId, val) {
     if (this.isPaused) return;
     if (val === '' || val === null) {
-      delete this.answers[qId];
+      delete this.answers[q.id];
     } else {
       this.answers[qId] = parseFloat(val);
     }
@@ -893,7 +901,7 @@ window.Exam = {
         answerInserts.push({
           attempt_id: this.attemptId,
           question_id: q.id,
-          selected_option_index: Array.isArray(userAns) ? userAns[0] : userAns,
+          selected_option_index: Array.isArray(userAns) == 'object' ? userAns[0] : userAns,
           is_correct: false,
           marks_awarded: -appliedNeg
         });
