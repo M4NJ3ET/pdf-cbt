@@ -245,7 +245,6 @@ window.Host = {
     window.location.hash = '#/host/review';
   },
 
-  // 2. Fetch Existing Test to Edit
   async loadTestForEdit(testId) {
     window.showLoading('Loading Test Details...', 'Fetching questions, sections, and marking rules...');
     try {
@@ -331,7 +330,7 @@ window.Host = {
     }
   },
 
-  // 3. Review & Sectional Settings View
+  // 3. Review & Sectional Settings View with Section Renaming & Reordering
   async renderReview(container) {
     const target = this.getTarget(container);
     if (!target) return;
@@ -345,6 +344,7 @@ window.Host = {
     const { data: folders } = await window.sb.from('folders').select('*').order('name');
     const folderList = folders || [];
 
+    // Extract unique sections in order of appearance
     const uniqueSecs = [];
     draft.questions.forEach(q => {
       const secName = (q.section || 'General').trim();
@@ -420,10 +420,10 @@ window.Host = {
               ${isGrouped ? `<span style="font-size:0.75rem; background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; margin-left:6px; font-weight:600;">🔗 Linked</span>` : ''}
             </div>
             <div style="display:flex; gap:6px; align-items:center;">
-              <select style="padding:3px 6px; font-size:0.8rem;" onchange="Host.changeQuestionType(${qIndex}, this.value)">
-                <option value="MCQ" ${qType === 'MCQ' ? 'selected' : ''}>MCQ (Single)</option>
-                <option value="MSQ" ${qType === 'MSQ' ? 'selected' : ''}>MSQ (Multiple)</option>
-                <option value="NAT" ${qType === 'NAT' ? 'selected' : ''}>NAT (Numeric)</option>
+              <select style="padding:3px 6px; font-size:0.80rem;" onchange="Host.changeQuestionType(${qIndex}, this.value)">
+                <option value="MCQ" ${qType === 'MCQ' ? 'selected' : ''}>MCQ</option>
+                <option value="MSQ" ${qType === 'MSQ' ? 'selected' : ''}>MSQ</option>
+                <option value="NAT" ${qType === 'NAT' ? 'selected' : ''}>NAT</option>
               </select>
               <button class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="Host.deleteQuestion(${qIndex})">Delete</button>
             </div>
@@ -431,7 +431,7 @@ window.Host = {
 
           ${isGrouped ? `
             <div class="form-group" style="background:var(--bg-muted); padding:10px; border-radius:var(--radius-sm); margin-bottom:12px;">
-              <label style="color:var(--text-secondary); font-size:0.8rem; margin-bottom:4px;">Shared Group Context / Passage</label>
+              <label style="color:var(--text-secondary); font-size:0.80rem; margin-bottom:4px;">Shared Group Context / Passage</label>
               <textarea rows="2" style="font-size:0.88rem;" onchange="Host.updateQGroupContext(${qIndex}, this.value)">${q.shared_context || ''}</textarea>
             </div>
           ` : ''}
@@ -459,10 +459,10 @@ window.Host = {
     target.innerHTML = `
       <div style="max-width: 960px; margin: 0 auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h2>${isEditing ? '✏️️ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>
+          <h2>${isEditing ? '✏ Edit Exam Paper' : 'Review Questions'} (${draft.questions.length})</h2>
           ${isEditing ? `<span style="background:#e0f2fe; color:#0369a1; padding:4px 12px; border-radius:14px; font-weight:700; font-size:0.85rem;">Editing Existing Test</span>` : ''}
         </div>
-        <p style="color:var(--text-secondary); margin-bottom:20px;">Review question types (MCQ, MSQ, NAT), verify answer keys, and set section rules below.</p>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Review question types, rename or reorder sections, and configure marking rules below.</p>
 
         <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
           <button class="btn-secondary" onclick="Host.addQuestionManually()">+ Add Question</button>
@@ -474,7 +474,7 @@ window.Host = {
         <!-- Sectional Configuration Form -->
         <div class="card" id="settings-anchor" style="margin-top:40px; background:var(--bg-muted);">
           <h3 style="margin-bottom:8px;">Exam & Section Configuration</h3>
-          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Set global or sectional timing, locking rules, and view total marks.</p>
+          <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px;">Rename sections, reorder them using arrows, and set timing rules.</p>
 
           <form id="exam-config-form">
             <div class="form-row">
@@ -508,21 +508,21 @@ window.Host = {
               </div>
             </div>
 
-            <!-- Section-Wise Setup Table -->
+            <!-- Section-Wise Setup Table with Rename & Reorder -->
             <div style="margin:20px 0; background:#fff; padding:16px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
-              <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Sectional Rules & Live Marks Calculation</h4>
+              <h4 style="margin-bottom:12px; color:var(--primary-accent);">📋 Sectional Rules, Renaming & Reordering</h4>
               <div style="overflow-x:auto;">
                 <table style="width:100%; border-collapse:collapse; font-size:0.9rem; text-align:left;" id="sections-table">
                   <thead>
                     <tr style="border-bottom:2px solid var(--border-color); color:var(--text-secondary);">
-                      <th style="padding:8px;">Section</th>
+                      <th style="padding:8px;">Section Name (Editable)</th>
                       <th style="padding:8px;">Questions</th>
-                      <th style="padding:8px;" class="sec-time-col">Duration (Mins)</th>
+                      <th style="padding:8px;" class="sec-time-col">Duration</th>
                       <th style="padding:8px;">Correct (+Marks)</th>
                       <th style="padding:8px;">Incorrect (-Marks)</th>
-                      <th style="padding:8px;">Section Marks</th>
-                      <th style="padding:8px;">Cutoff</th>
+                      <th style="padding:8px;">Section Total</th>
                       <th style="padding:8px;">Navigation</th>
+                      <th style="padding:8px; text-align:right;">Slide</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -532,33 +532,35 @@ window.Host = {
                       const durVal = ex.duration_minutes || 60;
                       const correctVal = ex.marks_correct !== undefined ? ex.marks_correct : 1.0;
                       const incorrectVal = ex.marks_incorrect !== undefined ? ex.marks_incorrect : 0.33;
-                      const cutVal = ex.cutoff_score || 0;
                       const switchVal = ex.allow_switching !== false ? 'true' : 'false';
 
                       return `
-                        <tr style="border-bottom:1px solid var(--border-color);" data-sec-row="${sIdx}">
-                          <td style="padding:10px 8px;"><strong>${sec}</strong></td>
+                        <tr style="border-bottom:1px solid var(--border-color);" data-sec-index="${sIdx}">
+                          <td style="padding:10px 8px;">
+                            <input type="text" class="sec-name-input" value="${sec}" onchange="Host.renameSection(${sIdx}, this.value)" style="width:160px; font-weight:600;" required />
+                          </td>
                           <td style="padding:10px 8px;" class="sec-q-count">${count}</td>
                           <td style="padding:10px 8px;" class="sec-time-col">
-                            <input type="number" class="sec-time-input" value="${durVal}" min="1" style="width:75px;" />
+                            <input type="number" class="sec-time-input" value="${durVal}" min="1" style="width:70px;" />
                           </td>
                           <td style="padding:10px 8px;">
-                            <input type="number" step="0.25" class="sec-correct-input" value="${correctVal}" oninput="Host.recalculateLiveMarks()" style="width:70px;" />
+                            <input type="number" step="0.25" class="sec-correct-input" value="${correctVal}" oninput="Host.recalculateLiveMarks()" style="width:65px;" />
                           </td>
                           <td style="padding:10px 8px;">
-                            <input type="number" step="0.01" class="sec-incorrect-input" value="${incorrectVal}" style="width:70px;" />
+                            <input type="number" step="0.01" class="sec-incorrect-input" value="${incorrectVal}" style="width:65px;" />
                           </td>
                           <td style="padding:10px 8px; font-weight:700; color:var(--primary-accent);" class="sec-total-marks">
                             ${(count * correctVal).toFixed(1)}
                           </td>
                           <td style="padding:10px 8px;">
-                            <input type="number" step="0.5" class="sec-cutoff-input" value="${cutVal}" min="0" style="width:65px;" />
-                          </td>
-                          <td style="padding:10px 8px;">
-                            <select class="sec-switch-select" style="width:100px;">
+                            <select class="sec-switch-select" style="width:95px;">
                               <option value="true" ${switchVal === 'true' ? 'selected' : ''}>🔓 Free</option>
                               <option value="false" ${switchVal === 'false' ? 'selected' : ''}>🔒 Locked</option>
                             </select>
+                          </td>
+                          <td style="padding:10px 8px; text-align:right; white-space:nowrap;">
+                            <button type="button" class="btn-secondary" style="padding:2px 6px; font-size:0.75rem;" onclick="Host.moveSection(${sIdx}, -1)">▲</button>
+                            <button type="button" class="btn-secondary" style="padding:2px 6px; font-size:0.75rem;" onclick="Host.moveSection(${sIdx}, 1)">▼</button>
                           </td>
                         </tr>
                       `;
@@ -567,10 +569,10 @@ window.Host = {
                 </table>
               </div>
 
-              <!-- Live Grand Total Marks Display -->
+              <!-- Grand Total Marks Display -->
               <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:12px; border-top:1px dashed var(--border-color); font-size:1.05rem;">
                 <span>🎯 <strong>Grand Total Exam Marks:</strong> <span id="grand-total-marks" style="color:var(--primary-accent); font-weight:800;">0.0</span></span>
-                <span style="font-size:0.85rem; color:var(--text-secondary);">Calculated as sum of all (Questions × Correct Marks) per section.</span>
+                <span style="font-size:0.85rem; color:var(--text-secondary);">Calculated as sum of all section totals.</span>
               </div>
             </div>
 
@@ -591,7 +593,7 @@ window.Host = {
             <div class="form-row" style="margin-top:10px;">
               <label style="display:flex; align-items:center; gap:8px;">
                 <input type="checkbox" id="cfg-shuffle-q" style="width:auto;" ${draft.shuffle_questions !== false ? 'checked' : ''} /> 
-                Intra-Section Shuffling (Shuffles questions within each section while keeping linked group questions together)
+                Intra-Section Shuffling
               </label>
             </div>
 
@@ -610,6 +612,48 @@ window.Host = {
       e.preventDefault();
       Host.saveAndPublishExam(uniqueSecs);
     };
+  },
+
+  renameSection(oldIdx, newName) {
+    const draft = window.AppState.parsedExamDraft;
+    const rows = document.querySelectorAll('#sections-table tbody tr');
+    const oldNameInput = rows[oldIdx]?.querySelector('.sec-name-input');
+    const oldName = oldNameInput?.defaultValue || uniqueSecsName(oldIdx);
+
+    // Update all questions belonging to this section name
+    draft.questions.forEach(q => {
+      if ((q.section || 'General').trim() === oldName.trim()) {
+        q.section = newName.trim();
+      }
+    });
+
+    Host.renderReview();
+  },
+
+  moveSection(secIdx, direction) {
+    const draft = window.AppState.parsedExamDraft;
+    const uniqueSecs = [];
+    draft.questions.forEach(q => {
+      const sName = (q.section || 'General').trim();
+      if (!uniqueSecs.includes(sName)) uniqueSecs.push(sName);
+    });
+
+    const targetIdx = secIdx + direction;
+    if (targetIdx < 0 || targetIdx >= uniqueSecs.length) return;
+
+    const secToMove = uniqueSecs[secIdx];
+    uniqueSecs.splice(secIdx, 1);
+    uniqueSecs.splice(targetIdx, 0, secToMove);
+
+    // Reorder questions in draft according to new section order
+    let reorderedQuestions = [];
+    uniqueSecs.forEach(sName => {
+      const matching = draft.questions.filter(q => (q.section || 'General').trim() === sName);
+      reorderedQuestions = reorderedQuestions.concat(matching);
+    });
+
+    draft.questions = reorderedQuestions;
+    Host.renderReview();
   },
 
   toggleTimingMode(mode) {
@@ -694,7 +738,6 @@ window.Host = {
     Host.renderReview();
   },
 
-  // 4. Save into Supabase with Zero Negative Marking & Global/Sectional Durations
   async saveAndPublishExam(uniqueSecs) {
     const draft = window.AppState.parsedExamDraft;
     const isEditing = !!this.editingTestId;
@@ -706,22 +749,21 @@ window.Host = {
     const passScore = parseFloat(document.getElementById('cfg-pass-score').value);
     const shuffleQ = document.getElementById('cfg-shuffle-q').checked;
 
-    let totalExamDuration = 0;
     const rows = document.querySelectorAll('#sections-table tbody tr');
-    
-    const sectionsConfig = uniqueSecs.map((secName, sIdx) => {
-      const row = rows[sIdx];
-      const dur = timingMode === 'GLOBAL' ? Math.round(globalDur / uniqueSecs.length) : (parseInt(row?.querySelector('.sec-time-input')?.value) || 60);
-      const correctM = parseFloat(row?.querySelector('.sec-correct-input')?.value) || 1.0;
-      // Fixed: use !== "" and !== NaN so zero (0) negative marking is correctly saved!
-      const incorrectRaw = row?.querySelector('.sec-incorrect-input')?.value;
+    let totalExamDuration = 0;
+
+    const sectionsConfig = [];
+    rows.forEach((row, sIdx) => {
+      const secName = row.querySelector('.sec-name-input').value.trim() || `Section ${sIdx + 1}`;
+      const dur = timingMode === 'GLOBAL' ? Math.round(globalDur / rows.length) : (parseInt(row.querySelector('.sec-time-input')?.value) || 60);
+      const correctM = parseFloat(row.querySelector('.sec-correct-input')?.value) || 1.0;
+      const incorrectRaw = row.querySelector('.sec-incorrect-input')?.value;
       const incorrectM = (incorrectRaw !== '' && !isNaN(parseFloat(incorrectRaw))) ? parseFloat(incorrectRaw) : 0.0;
-      
-      const cut = parseFloat(row?.querySelector('.sec-cutoff-input')?.value) || 0;
-      const allowSwitch = timingMode === 'GLOBAL' ? true : (row?.querySelector('.sec-switch-select')?.value === 'true');
+      const cut = parseFloat(row.querySelector('.sec-cutoff-input')?.value) || 0;
+      const allowSwitch = timingMode === 'GLOBAL' ? true : (row.querySelector('.sec-switch-select')?.value === 'true');
 
       totalExamDuration += dur;
-      return {
+      sectionsConfig.push({
         title: secName,
         order_index: sIdx,
         duration_minutes: dur,
@@ -731,16 +773,25 @@ window.Host = {
         marks_correct: correctM,
         marks_incorrect: incorrectM,
         marks_unattempted: 0
-      };
+      });
     });
 
     if (timingMode === 'GLOBAL') {
       totalExamDuration = globalDur;
     }
 
+    // Remap question sections based on edited table row names
+    const activeSecNames = sectionsConfig.map(s => s.title);
+    draft.questions.forEach((q, qIdx) => {
+      const currentRowSec = (q.section || 'General').trim();
+      // Match by index if rows match
+      const matchedSec = activeSecNames[qIdx] || activeSecNames[0] || 'General';
+      q.section = matchedSec;
+    });
+
     window.showLoading(
       isEditing ? 'Updating Exam Paper...' : 'Publishing Exam...',
-      'Saving sectional marking formulas, timing modes, and configuration...'
+      'Saving sectional configuration and marking formulas...'
     );
 
     try {
@@ -816,22 +867,20 @@ window.Host = {
       }
 
       // Insert Sections
-      const secInsertPayload = sectionsConfig.map(sc => ({
-        test_id: testRecord.id,
-        title: sc.title,
-        order_index: sc.order_index,
-        duration_minutes: sc.duration_minutes,
-        cutoff_score: sc.cutoff_score,
-        allow_switching: sc.allow_switching,
-        auto_advance: sc.auto_advance,
-        marks_correct: sc.marks_correct,
-        marks_incorrect: sc.marks_incorrect,
-        marks_unattempted: sc.marks_unattempted
-      }));
-
       const { data: insertedSections, error: secErr } = await window.sb
         .from('sections')
-        .insert(secInsertPayload)
+        .insert(sectionsConfig.map(sc => ({
+          test_id: testRecord.id,
+          title: sc.title,
+          order_index: sc.order_index,
+          duration_minutes: sc.duration_minutes,
+          cutoff_score: sc.cutoff_score,
+          allow_switching: sc.allow_switching,
+          auto_advance: sc.auto_advance,
+          marks_correct: sc.marks_correct,
+          marks_incorrect: sc.marks_incorrect,
+          marks_unattempted: sc.marks_unattempted
+        })))
         .select();
 
       if (secErr) throw new Error(secErr.message);
@@ -895,7 +944,7 @@ window.Host = {
           <div style="font-size:2.8rem; margin-bottom:8px;">${isEditing ? '💾' : '🎉'}</div>
           <h2>${isEditing ? 'Exam Updated Successfully!' : 'Exam Published Successfully!'}</h2>
           <p style="color:var(--text-secondary); margin-bottom:20px;">
-            ${isEditing ? 'All timing modes and zero negative marking configurations have been updated.' : 'Your exam is live. Share the key with candidates:'}
+            ${isEditing ? 'All section reordering, renaming, and configuration rules have been updated.' : 'Your exam is live. Share the key with candidates:'}
           </p>
           
           <div style="background:var(--accent-soft); padding:14px; border-radius:var(--radius-md); font-family:monospace; font-size:2.2rem; font-weight:700; color:var(--primary-accent); margin-bottom:16px;">
