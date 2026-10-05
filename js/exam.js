@@ -485,8 +485,8 @@ window.Exam = {
       </div>
     ` : '';
 
-    // Calculate initial remaining time for the section badge to prevent flashing 00:00:00
-    const secRem = (!this.isGlobalTimer && activeSec) ? (this.sectionTimeRemaining[activeSec.id] || 0) : 0;
+    // Directly grab the active section's live remaining time
+    const secRem = (!this.isGlobalTimer && activeSec) ? (this.sectionTimeRemaining[activeSec.id] !== undefined ? this.sectionTimeRemaining[activeSec.id] : (activeSec.duration_minutes || 60) * 60) : 0;
     const shrs = Math.floor(secRem / 3600);
     const smins = Math.floor((secRem % 3600) / 60);
     const ssecs = secRem % 60;
@@ -606,7 +606,7 @@ window.Exam = {
   setNatAnswer(qId, val) {
     if (this.isPaused) return;
     if (val === '' || val === null) {
-      delete this.answers[q.id];
+      delete this.answers[qId];
     } else {
       this.answers[qId] = parseFloat(val);
     }
@@ -895,7 +895,7 @@ window.Exam = {
           question_id: q.id,
           selected_option_index: Array.isArray(userAns) ? userAns[0] : userAns,
           is_correct: false,
-          marks_awarded: -appliedNotFound || -appliedNeg
+          marks_awarded: -appliedNeg
         });
       }
     });
@@ -931,7 +931,7 @@ window.Exam = {
           <div style="font-size:3rem; margin-bottom:12px;">✅</div>
           <h2>Exam Submitted Successfully</h2>
           <p style="color:var(--text-secondary); margin-bottom:24px;">All sections have been evaluated.</p>
-          <a href="#/results/${this.attemptId}"><button class="btn-primary" style="width:100%; padding:12px; font-size:1.1rem;">View Full Scorecard, View Full Scorecard</button></a>
+          <a href="#/results/${this.attemptId}"><button class="btn-primary" style="width:100%; padding:12px; font-size:1.1rem;">View Full Scorecard</button></a>
         </div>
       `;
     } catch (err) {
